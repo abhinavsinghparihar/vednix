@@ -1,0 +1,32 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# --- App data (never commit user data — lesson from audit SEC1) ---
+backend/data/
+*.sqlite3
+*.db
+chroma/
+
+# --- Secrets / env ---
+.env
+*.local
+
+# --- Node / frontend ---
+node_modules/
+.next/
+out/
+dist/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
