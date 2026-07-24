@@ -158,3 +158,12 @@ def test_ws_ping_pong(factory):
         with client.websocket_connect("/ws/chat") as ws:
             ws.send_json({"type": "ping"})
             assert ws.receive_json() == {"type": "pong"}
+
+
+def test_ws_temperature_override_reaches_llm(settings):
+    llm = FakeLLM()
+    with TestClient(create_app(settings=settings, llm_client=llm)) as client:
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({"type": "user_message", "content": "hello", "temperature": 0.05})
+            read_until(ws, "message_done")
+    assert llm.temperatures == [0.05]  # control-panel slider is real, not decorative

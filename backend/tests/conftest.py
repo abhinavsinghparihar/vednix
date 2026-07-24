@@ -29,6 +29,7 @@ class FakeLLM:
         self.offline = offline
         self.fail_chat = fail_chat
         self.calls: list[list[dict]] = []
+        self.temperatures: list[float] = []
 
     async def is_available(self) -> bool:
         return not self.offline
@@ -49,6 +50,7 @@ class FakeLLM:
         self, messages: list[dict], temperature: float, *, model: str | None = None
     ) -> AsyncIterator[str]:
         self.calls.append(messages)
+        self.temperatures.append(temperature)
         if self.fail_chat:
             raise OllamaError("fake llm failure")
             yield  # pragma: no cover — keeps this an async generator

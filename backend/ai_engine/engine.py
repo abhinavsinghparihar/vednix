@@ -80,7 +80,13 @@ class EngineSession:
         #: plugins that handled the most recent message (reported by the transport)
         self.last_plugins: list[str] = []
 
-    async def stream_reply(self, text: str, *, model: str | None = None) -> AsyncIterator[str]:
+    async def stream_reply(
+        self,
+        text: str,
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
+    ) -> AsyncIterator[str]:
         """The single, canonical message pipeline. Yields reply chunks.
 
         Persistence contract (audit B2/B3):
@@ -147,9 +153,10 @@ class EngineSession:
 
         chunks: list[str] = []
         first = True
+        effective_temperature = temperature if temperature is not None else settings.llm_temperature
         try:
             async for chunk in self.core.llm.chat_stream(
-                messages, settings.llm_temperature, model=model or None
+                messages, effective_temperature, model=model or None
             ):
                 if first:
                     await self.state.set(CoreState.SPEAKING)

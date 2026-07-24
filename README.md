@@ -11,9 +11,9 @@ Vednix answers in **your language** — Hindi, Hinglish, English, anything.
 | Phase | Scope | State |
 |---|---|---|
 | 0 | Repo foundations, audit, git hygiene | ✅ |
-| 1 | **Backend**: FastAPI · async Ollama · WS streaming · plugins · memory | ✅ **52/52 tests** |
-| 2 | Frontend: Next.js premium UI + AI Orb | ⏭️ next |
-| 3 | Voice (STT/TTS) | planned |
+| 1 | **Backend**: FastAPI · async Ollama · WS streaming · plugins · memory | ✅ **53/53 tests** |
+| 2 | **Frontend**: Next.js premium UI · AI Orb · glass studio | ✅ **built + visually verified** |
+| 3 | Voice (STT/TTS) | ⏭️ next |
 | 4 | Files, vision, knowledge base | planned |
 | 5 | Agents, OpenRouter, Postgres, Redis, Docker | planned |
 
@@ -24,12 +24,18 @@ Vednix answers in **your language** — Hindi, Hinglish, English, anything.
 ollama serve
 ollama pull qwen2.5:3b
 
-# 2. Backend
+# 2. Backend terminal
 cd backend
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                                   # optional; defaults just work
 python main.py                                         # http://127.0.0.1:8000 (docs at /docs)
+
+# 3. Frontend terminal
+cd frontend
+npm install
+cp .env.local.example .env.local                       # optional; defaults just work
+npm run dev                                            # → http://localhost:3000 ✨
 ```
 
 Try it (Hindi works out of the box):

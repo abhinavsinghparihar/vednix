@@ -87,7 +87,12 @@ async def _autotitle(
 
 
 async def _stream_reply(
-    session: EngineSession, sender: WSSender, message_id: str, text: str, model: str | None
+    session: EngineSession,
+    sender: WSSender,
+    message_id: str,
+    text: str,
+    model: str | None,
+    temperature: float | None,
 ) -> None:
     async def forward_state(state) -> None:
         await sender.send({"type": "state_changed", "state": state.name})
@@ -98,7 +103,7 @@ async def _stream_reply(
         await sender.send(
             {"type": "message_started", "message_id": message_id, "conversation_id": session.conversation_id}
         )
-        async for chunk in session.stream_reply(text, model=model):
+        async for chunk in session.stream_reply(text, model=model, temperature=temperature):
             partial.append(chunk)
             await sender.send({"type": "token", "message_id": message_id, "content": chunk})
     except asyncio.CancelledError:
@@ -195,7 +200,10 @@ async def ws_chat(ws: WebSocket) -> None:
                 message_id = uuid.uuid4().hex
                 first_exchange = (await memory.message_count(conv.id)) == 0
                 stream_task = asyncio.create_task(
-                    _stream_reply(session, sender, message_id, text, payload.model or conv.model)
+                    _stream_reply(
+                        session, sender, message_id, text,
+                        payload.model or conv.model, payload.temperature,
+                    )
                 )
                 if first_exchange:
                     stream_task.add_done_callback(

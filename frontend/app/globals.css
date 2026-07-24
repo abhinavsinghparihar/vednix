@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/* ============================================================
+   VEDNIX AI — design system
+   Neo-futuristic luxury: deep black / charcoal / warm brown,
+   luxury gold accent, glass, soft glow.
+   ============================================================ */
+
+@theme {
+  /* core palette */
+  --color-void: #050505;
+  --color-obsidian: #0a0a0b;
+  --color-charcoal: #101011;
+  --color-panel: #14120f;
+  --color-panel-2: #1b1815;
+  --color-edge: #292420;
+  --color-edge-soft: #211d19;
+
+  /* luxury accents */
+  --color-gold: #e3b857;
+  --color-gold-bright: #f4d68a;
+  --color-gold-dim: #8a6d2f;
+  --color-ember: #e8843c;
+  --color-cream: #f5f0e6;
+  --color-muted: #948c80;
+  --color-faint: #6b655d;
+
+  --color-danger: #f0564f;
+
+  /* typography */
+  --font-sans: var(--font-inter), var(--font-noto-dev), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jbmono), ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* motion */
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-shimmer: shimmer 2.2s linear infinite;
+  --animate-pulse-soft: pulseSoft 2.6s ease-in-out infinite;
+  --animate-spin-slow: spin 5s linear infinite;
+
+  --shadow-glow-gold: 0 0 24px -6px rgba(227, 184, 87, 0.55);
+  --shadow-card: 0 20px 60px -20px rgba(0, 0, 0, 0.85);
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-9px); }
+}
+@keyframes shimmer {
+  from { background-position: -200% 0; }
+  to { background-position: 200% 0; }
+}
+@keyframes pulseSoft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+html, body {
+  height: 100%;
+  background: var(--color-void);
+  color: var(--color-cream);
+  font-family: var(--font-sans);
+  overscroll-behavior: none;
+}
+
+::selection { background: rgba(227, 184, 87, 0.35); color: #fffdf6; }
+
+/* --- scrollbars ------------------------------------------------ */
+* { scrollbar-width: thin; scrollbar-color: #33291c transparent; }
+*::-webkit-scrollbar { width: 7px; height: 7px; }
+*::-webkit-scrollbar-thumb { background: #33291c; border-radius: 8px; }
+*::-webkit-scrollbar-thumb:hover { background: #4a3a24; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* --- glass ------------------------------------------------------ */
+@layer components {
+  .glass {
+    background: linear-gradient(160deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.016));
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+  }
+  .glass-strong {
+    background: linear-gradient(160deg, rgba(28, 25, 22, 0.86), rgba(16, 15, 13, 0.92));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+  }
+  .gold-border {
+    border: 1px solid transparent;
+    background:
+      linear-gradient(var(--color-panel), var(--color-panel)) padding-box,
+      linear-gradient(135deg, rgba(227,184,87,.65), rgba(227,184,87,.08) 40%, rgba(232,132,60,.45)) border-box;
+  }
+  .text-gold-gradient {
+    background: linear-gradient(115deg, #f7e5b4, #e3b857 45%, #c98f33 75%, #f4d68a);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { scrollbar-width: none; }
+}
+
+/* --- highlighted code (gold-on-charcoal hljs theme) -------------- */
+.md-body pre code.hljs { background: transparent; }
+.hljs { color: #d9d3c8; }
+.hljs-comment, .hljs-quote { color: #7d7568; font-style: italic; }
+.hljs-keyword, .hljs-selector-tag, .hljs-tag { color: #e3b857; }
+.hljs-string, .hljs-regexp, .hljs-addition { color: #b8d08c; }
+.hljs-number, .hljs-literal { color: #e8843c; }
+.hljs-title, .hljs-title.function_, .hljs-name { color: #f4d68a; }
+.hljs-title.class_, .hljs-type, .hljs-built_in { color: #8fd0c8; }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable { color: #d9b98c; }
+.hljs-symbol, .hljs-bullet, .hljs-link { color: #e3b857; }
+.hljs-meta, .hljs-deletion { color: #948c80; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
+
+/* --- markdown body ------------------------------------------------ */
+.md-body { line-height: 1.72; font-size: 0.925rem; overflow-wrap: break-word; }
+.md-body > *:first-child { margin-top: 0; }
+.md-body > *:last-child { margin-bottom: 0; }
+.md-body p { margin: 0.55em 0; }
+.md-body h1, .md-body h2, .md-body h3, .md-body h4 {
+  color: var(--color-gold-bright); font-weight: 650; letter-spacing: -0.01em;
+  margin: 1.1em 0 0.45em; line-height: 1.3;
+}
+.md-body h1 { font-size: 1.35rem; } .md-body h2 { font-size: 1.18rem; }
+.md-body h3 { font-size: 1.04rem; } .md-body h4 { font-size: 0.95rem; }
+.md-body ul, .md-body ol { margin: 0.55em 0; padding-left: 1.35em; }
+.md-body ul { list-style: disc; } .md-body ol { list-style: decimal; }
+.md-body li { margin: 0.28em 0; } .md-body li::marker { color: var(--color-gold-dim); }
+.md-body a { color: var(--color-gold); text-decoration: underline; text-underline-offset: 3px; }
+.md-body a:hover { color: var(--color-gold-bright); }
+.md-body blockquote {
+  border-left: 2px solid var(--color-gold-dim); padding: 0.15em 0 0.15em 0.9em;
+  color: var(--color-muted); margin: 0.8em 0;
+}
+.md-body hr { border-color: var(--color-edge); margin: 1.2em 0; }
+.md-body table { width: 100%; border-collapse: collapse; margin: 0.8em 0; font-size: 0.875rem; }
+.md-body th {
+  text-align: left; color: var(--color-gold-bright); font-weight: 600;
+  border-bottom: 1px solid var(--color-edge); padding: 0.45em 0.7em;
+}
+.md-body td { border-bottom: 1px solid var(--color-edge-soft); padding: 0.45em 0.7em; color: #cfc9bd; }
+.md-body code:not(pre code) {
+  background: rgba(227, 184, 87, 0.12); color: var(--color-gold-bright);
+  border: 1px solid rgba(227, 184, 87, 0.18);
+  padding: 0.1em 0.42em; border-radius: 6px; font-size: 0.85em;
+  font-family: var(--font-mono);
+}
+.md-body sup { font-size: 0.7em; }
+
+/* --- misc ------------------------------------------------------------ */
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,.045) 25%, rgba(255,255,255,.10) 37%, rgba(255,255,255,.045) 63%);
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+  border-radius: 8px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
+}

@@ -78,6 +78,7 @@ class WSUserMessage(BaseModel):
     client_id: str | None = None
     model: str | None = None
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
 
 class WSCancel(BaseModel):
