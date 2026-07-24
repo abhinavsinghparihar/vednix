@@ -25,6 +25,8 @@ export interface ChatMessage {
   plugins: string[];
   attachments?: AttachmentChip[];
   kbSources?: string[];
+  /** Phase 5 web citations (live from the done frame, like kbSources). */
+  sources?: { title: string; url: string }[];
   streaming: boolean;
   error: boolean;
 }
@@ -49,6 +51,11 @@ interface ChatStore {
   coreState: CoreStateName;
   ollamaAvailable: boolean;
   generating: boolean;
+
+  // internet research (Phase 5)
+  internet: boolean;
+  setInternet: (v: boolean) => void;
+  provider: string; // "ollama" | "openrouter" — shown in the health footer
 
   // voice (Phase 3)
   voiceState: VoiceState;
@@ -147,7 +154,8 @@ export const useChat = create<ChatStore>((set, get) => {
           generating: false,
           messages: messages.map((m) =>
             m.id === frame.message_id
-              ? { ...m, streaming: false, plugins: frame.plugins, kbSources: frame.kb_sources ?? [] }
+              ? { ...m, streaming: false, plugins: frame.plugins, kbSources: frame.kb_sources ?? [],
+                  sources: frame.sources ?? [] }
               : m,
           ),
         });
@@ -209,6 +217,10 @@ export const useChat = create<ChatStore>((set, get) => {
     voiceState: "idle",
     voiceReplies: false,
     voiceRate: 1.0,
+
+    internet: false,
+    setInternet: (v) => set({ internet: v }),
+    provider: "ollama",
     setVoiceState: (v) => set({ voiceState: v }),
     setVoiceReplies: (on) => {
       set({ voiceReplies: on });
@@ -281,6 +293,7 @@ export const useChat = create<ChatStore>((set, get) => {
           modelOptions: options,
           activeModel: models.default,
           ollamaAvailable: health.ollama_available,
+          provider: health.provider ?? "ollama",
           loadingConversations: false,
         });
       } catch {
@@ -342,7 +355,7 @@ export const useChat = create<ChatStore>((set, get) => {
         });
         return;
       }
-      const { activeId, activeModel, temperature, conversations } = get();
+      const { activeId, activeModel, temperature, internet, conversations } = get();
       const conv = conversations.find((c) => c.id === activeId);
       const prompt =
         text ||
@@ -367,6 +380,7 @@ export const useChat = create<ChatStore>((set, get) => {
         model: activeModel ?? conv?.model ?? null,
         temperature,
         attachments: drafts.map((d) => d.id),
+        internet,
       });
     },
 

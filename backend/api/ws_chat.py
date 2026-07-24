@@ -94,6 +94,7 @@ async def _stream_reply(
     model: str | None,
     temperature: float | None,
     attachments: list[AttachmentRef],
+    internet: bool = False,
 ) -> None:
     async def forward_state(state) -> None:
         await sender.send({"type": "state_changed", "state": state.name})
@@ -105,7 +106,7 @@ async def _stream_reply(
             {"type": "message_started", "message_id": message_id, "conversation_id": session.conversation_id}
         )
         async for chunk in session.stream_reply(
-            text, model=model, temperature=temperature, attachments=attachments
+            text, model=model, temperature=temperature, attachments=attachments, internet=internet
         ):
             partial.append(chunk)
             await sender.send({"type": "token", "message_id": message_id, "content": chunk})
@@ -126,6 +127,7 @@ async def _stream_reply(
             "conversation_id": session.conversation_id,
             "plugins": session.last_plugins,
             "kb_sources": session.last_kb_sources,
+            "sources": session.last_sources,
             "cancelled": False,
         }
     )
@@ -227,6 +229,7 @@ async def ws_chat(ws: WebSocket) -> None:
                     _stream_reply(
                         session, sender, message_id, text,
                         payload.model or conv.model, payload.temperature, attachment_refs,
+                        payload.internet,
                     )
                 )
                 if first_exchange:

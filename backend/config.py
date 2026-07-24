@@ -30,6 +30,23 @@ class Settings(BaseSettings):
     llm_request_timeout: float = 300.0
     llm_health_ttl: float = 10.0  # seconds to cache the Ollama health probe (audit P2/P3)
 
+    # --- LLM provider (Phase 5): offline default stays Ollama ---
+    llm_provider: str = "ollama"  # ollama | openrouter
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_model: str = "openai/gpt-oss-20b:free"
+
+    # --- Internet research (Phase 5): SearXNG, self-hostable = offline-creed ---
+    searxng_url: str = "http://localhost:8080"
+    search_max_results: int = 5
+    search_fetch_pages: int = 3  # top pages fetched & quoted into the turn
+    search_page_chars: int = 6000
+    search_timeout: float = 12.0
+
+    # --- Infra switches (Phase 5): all opt-in, local defaults unchanged ---
+    redis_url: str = ""  # empty → in-process rate limiting
+    auth_token: str = ""  # empty → open local mode (single-user default)
+
     # --- Server ---
     host: str = "127.0.0.1"
     port: int = 8000

@@ -84,7 +84,7 @@ export interface KnowledgeDoc {
 }
 
 export const api = {
-  health: () => request<{ status: string; ollama_available: boolean; default_model: string }>("/api/health"),
+  health: () => request<{ status: string; provider?: string; ollama_available: boolean; default_model: string }>("/api/health"),
   models: () => request<{ default: string; available: string[] }>("/api/models"),
 
   listConversations: () => request<ConversationSummary[]>("/api/conversations"),

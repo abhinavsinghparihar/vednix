@@ -71,6 +71,7 @@ class EngineCore:
     plugins: Any  # agents.plugin_manager.PluginManager
     files: "FileStore | None" = None
     knowledge: "KnowledgeService | None" = None
+    research: Any = None  # agents.research.ResearchService (Phase 5; None = internet off)
 
     def create_session(self, memory, conversation_id: str, *, language: str = "auto") -> "EngineSession":
         return EngineSession(self, memory, conversation_id, language=language)
@@ -90,6 +91,7 @@ class EngineSession:
         #: plugins + knowledge sources of the most recent message (done frame)
         self.last_plugins: list[str] = []
         self.last_kb_sources: list[str] = []
+        self.last_sources: list[dict] = []  # web citations (Phase 5): [{title, url}]
 
     async def persist_partial(self, partial: str) -> None:
         """Transport calls this on cancel — user keeps what they saw (audit B5)."""
@@ -107,6 +109,7 @@ class EngineSession:
         model: str | None = None,
         temperature: float | None = None,
         attachments: list[AttachmentRef] | None = None,
+        internet: bool = False,
     ) -> AsyncIterator[str]:
         """The canonical message pipeline. Yields reply chunks.
 
@@ -119,6 +122,7 @@ class EngineSession:
         attachments = attachments or []
         self.last_plugins = []
         self.last_kb_sources = []
+        self.last_sources = []
 
         attachments_json = (
             json.dumps([{"id": a.id, "name": a.name, "kind": a.kind, "size": a.size} for a in attachments])
@@ -157,6 +161,34 @@ class EngineSession:
                 "keeps working offline."
             )
             return
+
+        # 3w. Internet research (Phase 5): LangGraph agent over SearXNG. The final
+        #     synthesis stays in THIS pipeline (audit B3) — the agent only retrieves
+        #     and cites; failures degrade to honest, unpersisted guidance.
+        web_block = ""
+        if internet:
+            from agents.research import ResearchUnavailable
+
+            if self.core.research is None:
+                yield (
+                    "Internet search is disabled on this server "
+                    "(set VEDNIX_SEARXNG_URL to a SearXNG instance)."
+                )
+                return
+            await self.state.set(CoreState.SEARCHING)
+            try:
+                web = await self.core.research.run(text)
+                web_block = web.block
+                self.last_sources = [{"title": s.title, "url": s.url} for s in web.sources]
+            except ResearchUnavailable as exc:
+                await self.state.set(CoreState.IDLE)
+                yield f"🌐 {exc}"
+                return
+            except Exception:
+                logger.exception("research agent failed (conv=%s)", self.conversation_id)
+                await self.state.set(CoreState.IDLE)
+                yield "⚠️ Web research failed unexpectedly. Detail was logged."
+                return
 
         await self.state.set(CoreState.THINKING)
 
@@ -206,8 +238,9 @@ class EngineSession:
             *history,
         ]
         # Enrich the just-persisted user turn for the model (display stays clean).
-        if (kb_block or llm_user_content != text) and messages and messages[-1]["role"] == "user":
-            messages[-1] = {"role": "user", "content": f"{kb_block}{llm_user_content}"}
+        context_block = web_block + kb_block
+        if (context_block or llm_user_content != text) and messages and messages[-1]["role"] == "user":
+            messages[-1] = {"role": "user", "content": f"{context_block}{llm_user_content}"}
 
         chunks: list[str] = []
         first = True

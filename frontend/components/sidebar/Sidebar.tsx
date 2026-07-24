@@ -91,7 +91,8 @@ function ConversationRow({ conv, active }: { conv: ConversationSummary; active: 
 }
 
 export function Sidebar() {
-  const { conversations, activeId, newChat, loadingConversations, wsStatus, ollamaAvailable, sidebarOpen } = useChat();
+  const { conversations, activeId, newChat, loadingConversations, wsStatus, ollamaAvailable, sidebarOpen, provider } = useChat();
+  const providerLabel = provider === "openrouter" ? "OpenRouter" : "Ollama";
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -181,7 +182,7 @@ export function Sidebar() {
               {wsStatus === "open" ? "Backend live" : wsStatus === "connecting" ? "Connecting…" : "Reconnecting…"}
             </span>
             <span className={cn(ollamaAvailable ? "text-gold/80" : "text-red-300/80")}>
-              {ollamaAvailable ? "Ollama ✓" : "Ollama ✕"}
+              {providerLabel} {ollamaAvailable ? "✓" : "✕"}
             </span>
           </div>
         </motion.aside>

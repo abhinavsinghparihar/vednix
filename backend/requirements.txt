@@ -13,3 +13,7 @@ python-docx>=1.1
 openpyxl>=3.1
 python-pptx>=1.0
 python-multipart>=0.0.9
+# Phase 5 — research agent (pure-Python orchestration)
+langgraph>=0.2
+# Phase 5 — optional infra (imported lazily; safe to install always)
+redis>=5.0

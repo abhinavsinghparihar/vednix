@@ -1,0 +1,64 @@
+# Vednix AI — full local stack.
+#   docker compose up            → backend + frontend, talking to a local Ollama
+#   docker compose --profile research up   → adds SearXNG (internet search)
+#   docker compose --profile scale up      → adds Postgres + Redis
+#
+# Ollama stays OUTSIDE compose by design: the official image needs GPU flags that
+# vary per machine; `ollama serve` on the host works for everyone out of the box.
+services:
+  backend:
+    build: ./backend
+    ports: ["8000:8000"]
+    environment:
+      VEDNIX_OLLAMA_HOST: ${VEDNIX_OLLAMA_HOST:-http://host.docker.internal:11434}
+      VEDNIX_OLLAMA_MODEL: ${VEDNIX_OLLAMA_MODEL:-qwen2.5:3b}
+      VEDNIX_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+      VEDNIX_SEARXNG_URL: ${VEDNIX_SEARXNG_URL:-http://searxng:8080}
+      VEDNIX_DATABASE_URL: ${VEDNIX_DATABASE_URL:-sqlite+aiosqlite:///./data/vednix.db}
+      VEDNIX_REDIS_URL: ${VEDNIX_REDIS_URL:-}
+      VEDNIX_AUTH_TOKEN: ${VEDNIX_AUTH_TOKEN:-}
+      VEDNIX_LLM_PROVIDER: ${VEDNIX_LLM_PROVIDER:-ollama}
+      VEDNIX_OPENROUTER_API_KEY: ${VEDNIX_OPENROUTER_API_KEY:-}
+    volumes:
+      - vednix-data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach host Ollama on Linux
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_BASE: http://localhost:8000      # browser-side → host port
+        NEXT_PUBLIC_WS_BASE: ws://localhost:8000/ws/chat
+    ports: ["3000:3000"]
+    depends_on: [backend]
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles: ["research"]
+    ports: ["8080:8080"]
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8080/
+    volumes:
+      - searxng-config:/etc/searxng
+
+  postgres:
+    image: postgres:17-alpine
+    profiles: ["scale"]
+    environment:
+      POSTGRES_USER: vednix
+      POSTGRES_PASSWORD: vednix
+      POSTGRES_DB: vednix
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    # use with: VEDNIX_DATABASE_URL=postgresql+asyncpg://vednix:vednix@postgres:5432/vednix
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["scale"]
+    # use with: VEDNIX_REDIS_URL=redis://redis:6379/0
+
+volumes:
+  vednix-data:
+  searxng-config:
+  pg-data:

@@ -1,0 +1,12 @@
+# keep image contexts small and hermetic (mirrors .gitignore where it matters)
+**/node_modules
+**/.next
+**/__pycache__
+**/.venv
+**/data
+**/.data
+.git
+.arena
+docs
+*.md
+!backend/requirements*.txt

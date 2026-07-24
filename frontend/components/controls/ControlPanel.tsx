@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BrainCircuit, Globe, Volume2, Trash2, ChevronDown, Play, BookOpen, FileText, RefreshCw } from "lucide-react";
+import { BrainCircuit, Globe, Volume2, Trash2, ChevronDown, Play, BookOpen, FileText, RefreshCw, Bot } from "lucide-react";
 import { useChat } from "@/store/chat";
 import { api, type KnowledgeDoc, type MemoryItem } from "@/lib/api";
 import type { Language } from "@/lib/ws";
@@ -224,6 +224,8 @@ function VoiceSection() {
 
 export function ControlPanel() {
   const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature } = useChat();
+  const internet = useChat((s) => s.internet);
+  const setInternet = useChat((s) => s.setInternet);
   const activeConv = useChat((s) => s.conversations.find((c) => c.id === s.activeId));
   const setLanguage = useChat((s) => s.setLanguage);
 
@@ -295,14 +297,21 @@ export function ControlPanel() {
                   <span className="flex items-center gap-2.5 text-sm text-muted">
                     <Globe className="h-4 w-4" /> Internet search
                   </span>
+                  <Switch checked={internet} onCheckedChange={setInternet} label="Internet search (SearXNG · cited answers)" />
+                </div>
+                <div className="flex items-center justify-between rounded-xl px-1 py-1.5">
+                  <span className="flex items-center gap-2.5 text-sm text-muted">
+                    <Bot className="h-4 w-4" /> Multi-agent mode
+                  </span>
                   <span className="flex items-center gap-2">
-                    <Badge>Phase 5</Badge>
-                    <Switch checked={false} disabled label="Internet search" />
+                    <Badge>Phase 6</Badge>
+                    <Switch checked={false} disabled label="Multi-agent mode" />
                   </span>
                 </div>
               </GlassPanel>
               <p className="text-[11px] leading-snug text-faint">
-                Files & vision are live via the 📎 attach button — images auto-route to a local vision model.
+                Internet search runs a LangGraph agent over your SearXNG instance and cites sources — it needs
+                connectivity + a reachable instance (self-hostable: docker run -p 8080:8080 searxng/searxng).
               </p>
             </Section>
 

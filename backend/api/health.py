@@ -16,8 +16,9 @@ router = APIRouter(tags=["system"])
 async def health(request: Request, core: EngineCore = Depends(get_core)) -> HealthOut:
     return HealthOut(
         status="ok",
+        provider=core.settings.llm_provider,
         ollama_available=await core.llm.is_available(),
-        default_model=core.settings.ollama_model,
+        default_model=core.llm.model,
         assistant=core.settings.assistant_name,
     )
 
@@ -28,4 +29,4 @@ async def models(core: EngineCore = Depends(get_core)) -> dict:
         available = await core.llm.list_models()
     except OllamaError:
         available = []
-    return {"default": core.settings.ollama_model, "available": available}
+    return {"default": core.llm.model, "available": available}

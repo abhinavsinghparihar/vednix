@@ -15,7 +15,7 @@ import { Markdown } from "./Markdown";
 import { Orb } from "@/components/orb/Orb";
 import { Badge } from "@/components/ui/primitives";
 import { AttachmentChipView } from "@/components/composer/Composer";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Globe } from "lucide-react";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -166,7 +166,26 @@ export const MessageBubble = memo(function MessageBubble({
             </Badge>
           )}
         </div>
+        {message.sources && message.sources.length > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-white/5 pt-2">
+            <span className="text-[10px] uppercase tracking-[0.14em] text-faint">Sources</span>
+            {message.sources.map((s, i) => (
+              <a
+                key={`${s.url}-${i}`}
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex max-w-[240px] items-center gap-1 rounded-full border border-[rgba(227,184,87,0.25)] bg-[rgba(227,184,87,0.06)] px-2 py-0.5 text-[11px] text-gold/90 transition-colors hover:bg-[rgba(227,184,87,0.14)]"
+                title={s.url}
+              >
+                <Globe className="h-2.5 w-2.5 shrink-0" />
+                <span className="truncate">[{i + 1}] {s.title}</span>
+              </a>
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );
 });
+

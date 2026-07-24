@@ -30,12 +30,15 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 ### Client → Server
 ```jsonc
 {"type":"user_message","content":"…","conversation_id":null,"model":null,"language":null,
- "temperature":0.7,"attachments":["<upload id>", "…"]}
+ "temperature":0.7,"attachments":["<upload id>", "…"],"internet":true}
 // conversation_id omitted → a new "New chat" is created and announced
 // model/language/temperature override the conversation's settings for this message (language persists)
 // attachments: ids from POST /api/uploads (≤5). Unknown id → attachment_not_found error, nothing sent.
 // Known file kinds inject extracted text into the turn; images route to a vision model automatically
 // (notice "🖼 Routed images to …" when auto-switched, clear guidance when no vision model is local).
+// internet: runs the LangGraph research agent (plan→search→fetch) over SearXNG and cites the
+// results into the streamed answer; orb shows SEARCHING; failures degrade to honest guidance.
+// Note: deterministic plugins (time/system/memory) answer before the research/web path — by design.
 {"type":"cancel"}    // stop current generation; partial text persists with *(stopped)*
 {"type":"ping"}      // → pong
 ```
@@ -46,7 +49,9 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 {"type":"state_changed","state":"THINKING"}     // IDLE|LISTENING|THINKING|SPEAKING|EXECUTING|SEARCHING|LEARNING|UPDATING — drive the orb
 {"type":"message_started","message_id":"…","conversation_id":"…"}
 {"type":"token","message_id":"…","content":"…"} // raw LLM/plugin chunks, concatenate
-{"type":"message_done","message_id":"…","conversation_id":"…","plugins":["time"],"kb_sources":["Launch Plan"],"cancelled":false}
+{"type":"message_done","message_id":"…","conversation_id":"…","plugins":["time"],"kb_sources":["Launch Plan"],
+ "sources":[{"title":"Vednix Docs","url":"https://…"}],"cancelled":false}
+// sources: web citations from an internet turn (empty otherwise)
 {"type":"title_updated","conversation_id":"…","title":"…"}  // after first exchange
 {"type":"error","code":"busy|rate_limited|too_long|invalid|bad_payload|nothing_to_cancel|attachment_not_found","message":"…"}
 {"type":"pong"}
@@ -74,3 +79,27 @@ asyncio.run(chat("नमस्ते! मेरे CPU का हाल बत�
 - `content` must be non-empty, ≤ `VEDNIX_MAX_MESSAGE_CHARS` (default 32 000)
 - One active generation per connection (`busy` otherwise); ~8 messages / 20 s per connection
 - All REST bodies validated by Pydantic schemas (`api/schemas.py`)
+
+## Providers (Phase 5)
+
+`VEDNIX_LLM_PROVIDER=ollama` (default, fully offline) or `openrouter`. Both
+providers implement the original dev_ai client interface (`chat`/`chat_stream`/
+`is_available`/`list_models`), so everything upstream — engine, vision routing,
+model selector — is provider-agnostic. OpenRouter needs
+`VEDNIX_OPENROUTER_API_KEY`; `/api/health` reports the active `provider` and the
+UI footer labels it.
+
+## Internet research (Phase 5)
+
+`VEDNIX_SEARXNG_URL` points at a SearXNG instance (empty string disables the
+feature server-side). Searches run through the LangGraph state machine
+(`agents/research/service.py`): plan → parallel search → page fetch → context
+build. The final answer is still the single engine streaming pipeline (audit
+B3) with citations `[1]…` and a `sources` list on `message_done`.
+
+## Auth (Phase 5)
+
+`VEDNIX_AUTH_TOKEN` set → every `/api/*` and `/ws/chat` requires
+`Authorization: Bearer <token>` (WS accepts `?token=` too; `/api/health` stays
+open). Empty token = open single-user local mode. `VEDNIX_REDIS_URL` moves
+rate-limit state to Redis (falls back to in-process with a warning).

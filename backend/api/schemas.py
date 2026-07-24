@@ -65,6 +65,7 @@ class MemoryOut(BaseModel):
 
 class HealthOut(BaseModel):
     status: str
+    provider: str = "ollama"
     ollama_available: bool
     default_model: str
     assistant: str
@@ -101,6 +102,7 @@ class WSUserMessage(BaseModel):
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     attachments: list[str] = Field(default_factory=list, max_length=5)  # uploaded file ids
+    internet: bool = False  # Phase 5: run web research (SearXNG) before the LLM turn
 
 
 class WSCancel(BaseModel):

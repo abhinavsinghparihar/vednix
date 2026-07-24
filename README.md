@@ -15,7 +15,8 @@ Vednix answers in **your language** — Hindi, Hinglish, English, anything.
 | 2 | **Frontend**: Next.js premium UI · AI Orb · glass studio | ✅ **built + visually verified** |
 | 3 | **Voice**: dictation (hi-IN aware) · TTS replies · LISTENING/SPEAKING orb | ✅ built + verified |
 | 4 | **Files · vision · knowledge**: uploads (7 kinds) → LLM context, image→vision-model routing, FTS5 knowledge base cited into answers | ✅ **79/79 tests · browser-verified** |
-| 5 | Agents, OpenRouter, Postgres, Redis, Docker | planned |
+| 5 | **Agents · providers · infra**: LangGraph research agent (SearXNG, cited answers), OpenRouter provider behind the ♻️ LLM interface, Redis rate-limiting, bearer auth, Docker | ✅ **98/98 tests · browser-verified** |
+| 6 | Multi-agent orchestration, advanced research loops | planned |
 
 ## Quick start
 
@@ -36,6 +37,22 @@ cd frontend
 npm install
 cp .env.local.example .env.local                       # optional; defaults just work
 npm run dev                                            # → http://localhost:3000 ✨
+```
+
+Optional add-ons (all off by default):
+
+```bash
+# Internet research agent — self-hosted SearXNG + the Studio "Internet search" toggle
+docker run -d -p 8080:8080 searxng/searxng
+
+# Cloud provider instead of / alongside Ollama
+export VEDNIX_LLM_PROVIDER=openrouter VEDNIX_OPENROUTER_API_KEY=sk-or-…
+
+# Protect the API when serving beyond your own machine
+export VEDNIX_AUTH_TOKEN=change-me
+
+# One-command full stack (backend + frontend, optional SearXNG/Postgres/Redis profiles)
+docker compose up --build            # see docs/DOCKER.md
 ```
 
 Try it (Hindi works out of the box):
