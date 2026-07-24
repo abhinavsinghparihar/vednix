@@ -12,10 +12,11 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BrainCircuit, Globe, ImageIcon, Volume2, Trash2, ChevronDown } from "lucide-react";
+import { BrainCircuit, Globe, ImageIcon, Volume2, Trash2, ChevronDown, Play } from "lucide-react";
 import { useChat } from "@/store/chat";
 import { api, type MemoryItem } from "@/lib/api";
 import type { Language } from "@/lib/ws";
+import { tts } from "@/lib/tts";
 import { cn } from "@/lib/utils";
 import { Badge, Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
 
@@ -90,6 +91,66 @@ function RoadmapSwitch({ icon: Icon, label, phase }: { icon: typeof Globe; label
   );
 }
 
+function VoiceSection() {
+  const { voiceReplies, setVoiceReplies, voiceRate, setVoiceRate } = useChat();
+  const [ttsSupported] = useState(() => tts.supported);
+
+  return (
+    <Section title="Voice">
+      <GlassPanel className="space-y-3 p-3">
+        <div className="flex items-center justify-between">
+          <span className="flex items-center gap-2 text-sm text-cream/85">
+            <Volume2 className="h-4 w-4 text-gold/80" /> Speak replies
+          </span>
+          <Switch
+            checked={voiceReplies}
+            onCheckedChange={setVoiceReplies}
+            disabled={!ttsSupported}
+            label="Speak replies"
+          />
+        </div>
+        {!ttsSupported && (
+          <p className="text-[11px] leading-snug text-faint">
+            Speech synthesis isn't available in this browser.
+          </p>
+        )}
+        <div className="space-y-1.5">
+          <div className="flex justify-between text-[10px] text-faint">
+            <span>Speed · {voiceRate.toFixed(1)}×</span>
+            <span>Hindi voice auto-picked</span>
+          </div>
+          <Slider
+            min={0.6}
+            max={1.6}
+            step={0.1}
+            value={voiceRate}
+            onChange={(e) => setVoiceRate(Number(e.target.value))}
+            aria-label="Voice speed"
+          />
+        </div>
+        <Button
+          variant="subtle"
+          size="sm"
+          className="w-full"
+          disabled={!ttsSupported}
+          onClick={() =>
+            tts.speak(
+              "नमस्ते! मैं Vednix हूँ — I'm your offline AI workspace.",
+              "hi-IN",
+            )
+          }
+        >
+          <Play className="h-3 w-3" /> Test voice
+        </Button>
+        <p className="text-[10.5px] leading-snug text-faint">
+          Replies read aloud using your OS voices (offline). Dictation: tap the mic
+          — hi-IN handles हिंदी + Hinglish.
+        </p>
+      </GlassPanel>
+    </Section>
+  );
+}
+
 export function ControlPanel() {
   const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature } = useChat();
   const activeConv = useChat((s) => s.conversations.find((c) => c.id === s.activeId));
@@ -153,11 +214,12 @@ export function ControlPanel() {
 
             <MemorySection />
 
+            <VoiceSection />
+
             <Section title="Capabilities">
               <GlassPanel className="space-y-0.5 p-2">
                 <RoadmapSwitch icon={Globe} label="Internet search" phase="Phase 5" />
                 <RoadmapSwitch icon={ImageIcon} label="Vision · OCR" phase="Phase 4" />
-                <RoadmapSwitch icon={Volume2} label="Voice" phase="Phase 3" />
               </GlassPanel>
             </Section>
 

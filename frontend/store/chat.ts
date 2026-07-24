@@ -8,6 +8,8 @@
 import { create } from "zustand";
 import { api, WS_URL, type ConversationSummary } from "@/lib/api";
 import { WSClient, type CoreStateName, type Language, type ServerFrame, type WSStatus } from "@/lib/ws";
+import { tts } from "@/lib/tts";
+import { detectSpeechLang, sanitizeForSpeech } from "@/lib/speechText";
 
 export interface ChatMessage {
   id: string;
@@ -17,6 +19,10 @@ export interface ChatMessage {
   streaming: boolean;
   error: boolean;
 }
+
+/** Local voice arbitration: mic/speaking overrides the server-driven state so
+ * LISTENING and SPEAKING orb animations (dead since the desktop app) finally fire. */
+export type VoiceState = "idle" | "listening" | "speaking";
 
 export const MAX_CHARS = 32_000;
 
@@ -34,6 +40,16 @@ interface ChatStore {
   coreState: CoreStateName;
   ollamaAvailable: boolean;
   generating: boolean;
+
+  // voice (Phase 3)
+  voiceState: VoiceState;
+  voiceReplies: boolean;
+  voiceRate: number;
+  setVoiceState: (v: VoiceState) => void;
+  setVoiceReplies: (on: boolean) => void;
+  setVoiceRate: (rate: number) => void;
+  speakMessage: (messageId: string) => void;
+  stopSpeaking: () => void;
 
   // ui
   sidebarOpen: boolean;
@@ -60,8 +76,21 @@ interface ChatStore {
 
 let ws: WSClient | null = null;
 let streamingId: string | null = null;
+let ttsWired = false;
 
 export const useChat = create<ChatStore>((set, get) => {
+  if (!ttsWired && typeof window !== "undefined") {
+    ttsWired = true;
+    // TTS playback drives the orb's SPEAKING state (unless the mic owns it)
+    tts.onSpeakingChange((speaking) => {
+      const cur = get().voiceState;
+      if (speaking) {
+        if (cur !== "listening") set({ voiceState: "speaking" });
+      } else if (cur === "speaking") {
+        set({ voiceState: "idle" });
+      }
+    });
+  }
   function handleFrame(frame: ServerFrame): void {
     const { messages, activeId, conversations } = get();
     switch (frame.type) {
@@ -106,6 +135,12 @@ export const useChat = create<ChatStore>((set, get) => {
           ),
         });
         void refreshConversations(set);
+        // Phase 3: auto-speak the finished reply when voice replies are on
+        const done = messages.find((m) => m.id === frame.message_id);
+        if (get().voiceReplies && done?.role === "assistant" && !frame.cancelled && done.content) {
+          const conv = get().conversations.find((c) => c.id === frame.conversation_id);
+          tts.speak(sanitizeForSpeech(done.content), detectSpeechLang(done.content, conv?.language ?? "auto"));
+        }
         break;
       }
 
@@ -153,6 +188,30 @@ export const useChat = create<ChatStore>((set, get) => {
     coreState: "IDLE",
     ollamaAvailable: true,
     generating: false,
+
+    voiceState: "idle",
+    voiceReplies: false,
+    voiceRate: 1.0,
+    setVoiceState: (v) => set({ voiceState: v }),
+    setVoiceReplies: (on) => {
+      set({ voiceReplies: on });
+      if (!on) tts.stop();
+    },
+    setVoiceRate: (rate) => {
+      tts.rate = rate;
+      set({ voiceRate: rate });
+    },
+    speakMessage: (messageId) => {
+      const msg = get().messages.find((m) => m.id === messageId);
+      if (!msg?.content) return;
+      if (tts.speaking) {
+        tts.stop();
+        return;
+      }
+      const conv = get().conversations.find((c) => c.id === get().activeId);
+      tts.speak(sanitizeForSpeech(msg.content), detectSpeechLang(msg.content, conv?.language ?? "auto"));
+    },
+    stopSpeaking: () => tts.stop(),
 
     sidebarOpen: true,
     panelOpen: true,
@@ -304,4 +363,12 @@ async function refreshConversations(
     const conversations = await api.listConversations();
     set({ conversations });
   } catch { /* transient */ }
+}
+
+/** The state the UI should actually render: voice arbitration beats server state
+ * (listening/speaking are local hardware events the backend never sees). */
+export function useDisplayCoreState(): CoreStateName {
+  return useChat((s) =>
+    s.voiceState === "listening" ? "LISTENING" : s.voiceState === "speaking" ? "SPEAKING" : s.coreState,
+  );
 }

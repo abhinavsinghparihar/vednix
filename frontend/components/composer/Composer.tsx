@@ -7,15 +7,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Paperclip, Mic, ArrowUp, Square } from "lucide-react";
-import { MAX_CHARS, useChat } from "@/store/chat";
+import { Paperclip, Mic, ArrowUp, Square, MicOff } from "lucide-react";
+import { MAX_CHARS, useChat, useDisplayCoreState } from "@/store/chat";
 import { cn } from "@/lib/utils";
 import { Badge, Button } from "@/components/ui/primitives";
+import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
+
+// Mic locale: follows the conversation language (Hinglish → hi-IN recognizer,
+// which handles romanized Hindi + English in one stream)
+function micLocale(language: string | undefined): string {
+  if (language === "hi" || language === "hinglish") return "hi-IN";
+  if (language === "en") return "en-US";
+  return "hi-IN"; // auto: hi-IN recognizer handles Hindi + Hinglish + English
+}
 
 export function Composer() {
-  const { send, stop, generating, wsStatus, coreState } = useChat();
+  const { send, stop, generating, wsStatus, activeId, conversations, setVoiceState } = useChat();
+  const coreState = useDisplayCoreState();
+  const convLang = conversations.find((c) => c.id === activeId)?.language;
   const [value, setValue] = useState("");
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const stt = useSpeechRecognition();
+  const baseTextRef = useRef("");
 
   // "edit message" copies text here
   useEffect(() => {
@@ -39,10 +52,34 @@ export function Composer() {
   const submit = () => {
     const text = value.trim();
     if (!text) return;
+    if (stt.status === "listening") {
+      stt.stop();
+      setVoiceState("idle");
+    }
     send(text);
     setValue("");
+    baseTextRef.current = "";
   };
 
+  const toggleMic = () => {
+    if (stt.status === "listening") {
+      stt.stop();
+      setVoiceState("idle");
+      return;
+    }
+    baseTextRef.current = value ? `${value} ` : "";
+    stt.start({
+      lang: micLocale(convLang),
+      onInterim: (interim) => setValue((baseTextRef.current + interim).slice(0, MAX_CHARS)),
+      onFinal: (final) => {
+        baseTextRef.current = `${baseTextRef.current}${final} `;
+        setValue(baseTextRef.current.slice(0, MAX_CHARS));
+      },
+    });
+    setVoiceState("listening"); // orb finally plays LISTENING
+  };
+
+  const listening = stt.status === "listening";
   const over = value.length > MAX_CHARS * 0.95;
 
   return (
@@ -91,13 +128,36 @@ export function Composer() {
             </span>
           )}
 
-          {/* mic — Phase 3 */}
+          {/* mic — Phase 3, real (WebSpeech, hi-IN aware) */}
           <div className="group relative">
-            <Button size="icon" variant="ghost" aria-label="Voice input (Phase 3)" disabled>
-              <Mic className="h-4 w-4" />
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label={listening ? "Stop dictation" : "Dictate (Hindi/Hinglish/English)"}
+              onClick={toggleMic}
+              disabled={!stt.supported || stt.status === "unsupported"}
+              className={cn(listening && "text-[#f0564f]")}
+            >
+              {!stt.supported || stt.status === "denied" ? (
+                <MicOff className="h-4 w-4" />
+              ) : (
+                <Mic className={cn("h-4 w-4", listening && "animate-pulse-soft")} />
+              )}
             </Button>
-            <Badge className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100">
-              Phase 3
+            {listening && (
+              <span className="pointer-events-none absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                <span className="absolute h-full w-full animate-ping rounded-full bg-[#f0564f]/60" />
+                <span className="h-2.5 w-2.5 rounded-full bg-[#f0564f]" />
+              </span>
+            )}
+            <Badge className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap opacity-0 transition-opacity group-hover:opacity-100">
+              {stt.status === "denied"
+                ? "Mic blocked"
+                : !stt.supported
+                  ? "Use Chrome/Edge"
+                  : listening
+                    ? "Listening… tap to stop"
+                    : `Dictate · ${micLocale(convLang)}`}
             </Badge>
           </div>
 

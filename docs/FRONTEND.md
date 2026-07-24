@@ -35,6 +35,21 @@ conversation_created / title_updated / error`), auto-reconnect with backoff.
 Every right-panel control is real: model → WS payload, temperature → WS payload
 (backend-regression-tested), language → PATCH + system-prompt directive.
 
+## Voice (Phase 3)
+
+- **STT** `hooks/useSpeechRecognition.ts`: WebSpeech wrapper (feature-detected,
+  Chrome/Edge recommended). Mic locale follows conversation language — `hi-IN`
+  handles हिंदी + Hinglish in one stream. Interim results render live in the
+  composer; permission-denied and unsupported states are explicit.
+- **TTS** `lib/tts.ts` (singleton over `speechSynthesis`): OS voices, fully
+  offline; voice picker prefers neural/natural local voices; per-message speak
+  button + "Speak replies" auto-TTS (Studio panel) + speed slider + test voice.
+  `lib/speechText.ts` sanitizes markdown (code → "(code snippet)", tables
+  flattened) and sniffs Devanagari to pick hi-IN vs en-US per message.
+- **Orb arbitration** `store/chat.ts → useDisplayCoreState()`: local
+  `voiceState` (listening/speaking) overrides server `CoreState` — LISTENING
+  and SPEAKING animations, unreachable since the desktop app, now fire.
+
 ## Notable disciplines
 
 - **Bundle:** `lucide-react`/`framer-motion` optimizePackageImports; Mermaid +

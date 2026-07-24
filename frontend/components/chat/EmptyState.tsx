@@ -7,7 +7,7 @@
 
 import { motion } from "framer-motion";
 import { Clock3, Cpu, Languages, BrainCircuit } from "lucide-react";
-import { useChat } from "@/store/chat";
+import { useChat, useDisplayCoreState } from "@/store/chat";
 import { Orb } from "@/components/orb/Orb";
 
 const SUGGESTIONS = [
@@ -19,7 +19,7 @@ const SUGGESTIONS = [
 
 export function EmptyState() {
   const send = useChat((s) => s.send);
-  const coreState = useChat((s) => s.coreState);
+  const coreState = useDisplayCoreState();
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 pb-16">

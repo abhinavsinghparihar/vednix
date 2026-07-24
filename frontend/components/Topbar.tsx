@@ -7,7 +7,7 @@
 
 import { useState } from "react";
 import { PanelLeft, PanelRight, Pencil, Check } from "lucide-react";
-import { useChat } from "@/store/chat";
+import { useChat, useDisplayCoreState } from "@/store/chat";
 import { Button } from "@/components/ui/primitives";
 import { Orb } from "@/components/orb/Orb";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,8 @@ const STATE_STYLES: Record<string, string> = {
 };
 
 export function Topbar() {
-  const { toggleSidebar, togglePanel, coreState, activeId, conversations, renameConversation } = useChat();
+  const { toggleSidebar, togglePanel, activeId, conversations, renameConversation } = useChat();
+  const coreState = useDisplayCoreState();
   const conv = conversations.find((c) => c.id === activeId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");

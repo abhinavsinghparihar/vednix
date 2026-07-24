@@ -8,8 +8,8 @@
 
 import { memo, useState } from "react";
 import { motion } from "framer-motion";
-import { Check, Copy, Pencil, RotateCcw, Puzzle } from "lucide-react";
-import { useChat, type ChatMessage } from "@/store/chat";
+import { Check, Copy, Pencil, RotateCcw, Puzzle, Volume2, VolumeX } from "lucide-react";
+import { useChat, useDisplayCoreState, type ChatMessage } from "@/store/chat";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { Orb } from "@/components/orb/Orb";
@@ -41,7 +41,8 @@ export const MessageBubble = memo(function MessageBubble({
   message: ChatMessage;
   isLastAssistant: boolean;
 }) {
-  const { coreState, send } = useChat();
+  const { send, speakMessage, voiceState } = useChat();
+  const coreState = useDisplayCoreState();
 
   if (message.role === "system") {
     return (
@@ -108,6 +109,19 @@ export const MessageBubble = memo(function MessageBubble({
           )}
         >
           <CopyButton text={message.content} />
+          {!isUser && message.content && (
+            <button
+              aria-label={voiceState === "speaking" ? "Stop voice playback" : "Read aloud"}
+              title={voiceState === "speaking" ? "Stop voice" : "Read aloud"}
+              className={cn(
+                "rounded-md p-1.5 transition-colors hover:bg-white/5",
+                voiceState === "speaking" ? "text-gold" : "text-muted hover:text-gold-bright",
+              )}
+              onClick={() => speakMessage(message.id)}
+            >
+              {voiceState === "speaking" ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </button>
+          )}
           {isUser && (
             <button
               aria-label="Edit into composer"
