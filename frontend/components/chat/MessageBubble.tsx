@@ -15,7 +15,7 @@ import { Markdown } from "./Markdown";
 import { Orb } from "@/components/orb/Orb";
 import { Badge } from "@/components/ui/primitives";
 import { AttachmentChipView } from "@/components/composer/Composer";
-import { BookOpen, Globe } from "lucide-react";
+import { BookOpen, Globe, Bot, Loader2 } from "lucide-react";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -166,6 +166,32 @@ export const MessageBubble = memo(function MessageBubble({
             </Badge>
           )}
         </div>
+        {(message.steps?.length ?? 0) > 0 && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-faint">
+            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.14em]">
+              {message.streaming ? (
+                <Loader2 className="h-2.5 w-2.5 animate-spin" />
+              ) : (
+                <Bot className="h-2.5 w-2.5" />
+              )}
+              Agents
+            </span>
+            {message.steps!.map((s, i) => (
+              <span
+                key={`${s.step}-${i}`}
+                title={s.detail}
+                className={cn(
+                  "rounded-full border px-2 py-0.5",
+                  message.streaming && i === message.steps!.length - 1
+                    ? "border-[rgba(227,184,87,0.45)] text-gold animate-pulse"
+                    : "border-white/10 text-faint",
+                )}
+              >
+                {s.step}
+              </span>
+            ))}
+          </div>
+        )}
         {message.sources && message.sources.length > 0 && (
           <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-white/5 pt-2">
             <span className="text-[10px] uppercase tracking-[0.14em] text-faint">Sources</span>

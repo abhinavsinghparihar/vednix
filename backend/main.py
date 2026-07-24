@@ -90,6 +90,8 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
                 fetch_pages=settings.search_fetch_pages,
                 page_chars=settings.search_page_chars,
                 timeout=settings.search_timeout,
+                max_iterations=settings.agents_max_iterations,
+                max_subquestions=settings.agents_max_subquestions,
             )
         app.state.core = EngineCore(
             settings=settings, llm=llm, plugins=PluginManager(build_plugins()),

@@ -257,7 +257,7 @@ def test_provider_switch_builds_openrouter(settings):
 # --- internet research through the WS pipeline -------------------------------------
 
 class _FakeWebResearch:
-    async def run(self, question: str):
+    async def run(self, question: str, *, depth: str = "quick", on_step=None):
         from agents.research.service import WebContext, WebSource
         return WebContext(
             block='Web research results:\n[1] "Docs" — https://docs.example\nThe answer is 42.\n\n',
@@ -266,7 +266,7 @@ class _FakeWebResearch:
 
 
 class _UnavailableResearch:
-    async def run(self, question: str):
+    async def run(self, question: str, *, depth: str = "quick", on_step=None):
         raise ResearchUnavailable("SearXNG unreachable at http://localhost:8080. docker run …")
 
 

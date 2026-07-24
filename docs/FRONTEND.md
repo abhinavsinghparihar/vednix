@@ -76,3 +76,14 @@ Every right-panel control is real: model → WS payload, temperature → WS payl
   pipeline: pdf/docx/xlsx/csv/pptx/txt/md), list with chunk counts, remove.
   Hits injected into answers surface as `kb_sources` chips on the reply.
 - **Studio → Voice (Phase 3):** speak-replies toggle + speed slider + test.
+
+## Phase 6 — multi-agent mode (shipped)
+
+- **Multi-agent switch is real** in Studio → Capabilities (was the last Phase
+  badge — every toggle in the product is now functional). It implies web
+  research even when the Internet switch is off; the backend routes
+  `multi_agent` to the deep LangGraph loop.
+- **Live agent trace:** `agent_step` WS frames stack as step chips (plan →
+  search → fetch → critique → refine → build) above the reply; the latest chip
+  pulses while the agents work, the full trace stays on the message.
+- Sources continue to render as gold citation links under the reply.

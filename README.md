@@ -16,7 +16,7 @@ Vednix answers in **your language** — Hindi, Hinglish, English, anything.
 | 3 | **Voice**: dictation (hi-IN aware) · TTS replies · LISTENING/SPEAKING orb | ✅ built + verified |
 | 4 | **Files · vision · knowledge**: uploads (7 kinds) → LLM context, image→vision-model routing, FTS5 knowledge base cited into answers | ✅ **79/79 tests · browser-verified** |
 | 5 | **Agents · providers · infra**: LangGraph research agent (SearXNG, cited answers), OpenRouter provider behind the ♻️ LLM interface, Redis rate-limiting, bearer auth, Docker | ✅ **98/98 tests · browser-verified** |
-| 6 | Multi-agent orchestration, advanced research loops | planned |
+| 6 | **Multi-agent orchestration**: planner + researcher + critic with a real LangGraph conditional loop (critique → refine → re-search, capped), live agent-step trace in the UI | ✅ **109/109 tests · browser-verified** |
 
 ## Quick start
 

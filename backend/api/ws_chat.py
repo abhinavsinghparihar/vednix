@@ -95,18 +95,24 @@ async def _stream_reply(
     temperature: float | None,
     attachments: list[AttachmentRef],
     internet: bool = False,
+    multi_agent: bool = False,
 ) -> None:
     async def forward_state(state) -> None:
         await sender.send({"type": "state_changed", "state": state.name})
 
+    async def forward_step(entry) -> None:
+        await sender.send({"type": "agent_step", **entry})
+
     session.bus.subscribe("state_changed", forward_state)
+    session.bus.subscribe("agent_step", forward_step)
     partial: list[str] = []
     try:
         await sender.send(
             {"type": "message_started", "message_id": message_id, "conversation_id": session.conversation_id}
         )
         async for chunk in session.stream_reply(
-            text, model=model, temperature=temperature, attachments=attachments, internet=internet
+            text, model=model, temperature=temperature, attachments=attachments,
+            internet=internet, multi_agent=multi_agent,
         ):
             partial.append(chunk)
             await sender.send({"type": "token", "message_id": message_id, "content": chunk})
@@ -119,6 +125,7 @@ async def _stream_reply(
         raise
     finally:
         session.bus.unsubscribe("state_changed", forward_state)
+        session.bus.unsubscribe("agent_step", forward_step)
 
     await sender.send(
         {
@@ -128,6 +135,7 @@ async def _stream_reply(
             "plugins": session.last_plugins,
             "kb_sources": session.last_kb_sources,
             "sources": session.last_sources,
+            "steps": session.last_steps,
             "cancelled": False,
         }
     )
@@ -229,7 +237,7 @@ async def ws_chat(ws: WebSocket) -> None:
                     _stream_reply(
                         session, sender, message_id, text,
                         payload.model or conv.model, payload.temperature, attachment_refs,
-                        payload.internet,
+                        payload.internet, payload.multi_agent,
                     )
                 )
                 if first_exchange:

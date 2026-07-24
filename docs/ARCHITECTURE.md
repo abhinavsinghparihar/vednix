@@ -81,3 +81,22 @@ client ─ user_message ─▶ ws_chat ─ validate/rate-limit/resolve-conv
 swappable without caller changes; `OLLAMA_*` and DB URL are env-driven; the LLM
 client is a Protocol — OpenRouter provider plugs into the same `chat/chat_stream`
 contract (Phase 5) exactly as the original README predicted.
+
+## Multi-agent research (Phase 6)
+
+`agents/research/service.py` compiles two LangGraph state machines over the same
+agent nodes — deep mode is a *loop*, quick mode a *chain*:
+
+```
+quick:  plan → search → fetch → build → context block
+deep:   planner → search → fetch → critic ─┐
+             ▲                refine(follow_ups) ◄┘ verdicts unanswered & rounds left
+        (loop cap: VEDNIX_AGENTS_MAX_ITERATIONS)
+                    └→ build → context block
+```
+
+Invariants: retrieval only (synthesis stays in the engine's single streaming
+pipeline); JSON-contract agent I/O with salvage + treat-as-covered fallback (the
+graph always terminates); every node emits `(step, detail)` via `on_step` →
+engine → `agent_step` WS frames, so the orchestration is visible in the UI
+rather than a black box.

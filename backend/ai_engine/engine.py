@@ -92,6 +92,7 @@ class EngineSession:
         self.last_plugins: list[str] = []
         self.last_kb_sources: list[str] = []
         self.last_sources: list[dict] = []  # web citations (Phase 5): [{title, url}]
+        self.last_steps: list[dict] = []    # agent trace (Phase 6): [{step, detail}]
 
     async def persist_partial(self, partial: str) -> None:
         """Transport calls this on cancel — user keeps what they saw (audit B5)."""
@@ -110,6 +111,7 @@ class EngineSession:
         temperature: float | None = None,
         attachments: list[AttachmentRef] | None = None,
         internet: bool = False,
+        multi_agent: bool = False,
     ) -> AsyncIterator[str]:
         """The canonical message pipeline. Yields reply chunks.
 
@@ -123,6 +125,7 @@ class EngineSession:
         self.last_plugins = []
         self.last_kb_sources = []
         self.last_sources = []
+        self.last_steps = []
 
         attachments_json = (
             json.dumps([{"id": a.id, "name": a.name, "kind": a.kind, "size": a.size} for a in attachments])
@@ -162,22 +165,31 @@ class EngineSession:
             )
             return
 
-        # 3w. Internet research (Phase 5): LangGraph agent over SearXNG. The final
-        #     synthesis stays in THIS pipeline (audit B3) — the agent only retrieves
-        #     and cites; failures degrade to honest, unpersisted guidance.
+        # 3w. Internet research (Phase 5/6): LangGraph agent over SearXNG. The final
+        #     synthesis stays in THIS pipeline (audit B3) — agents only retrieve and
+        #     cite. multi_agent upgrades depth to the planner/critic loop; every graph
+        #     step is published to the bus so the UI can show the orchestration live.
         web_block = ""
-        if internet:
+        if internet or multi_agent:
             from agents.research import ResearchUnavailable
 
             if self.core.research is None:
                 yield (
-                    "Internet search is disabled on this server "
+                    "Internet research is disabled on this server "
                     "(set VEDNIX_SEARXNG_URL to a SearXNG instance)."
                 )
                 return
             await self.state.set(CoreState.SEARCHING)
+
+            async def report_step(step: str, detail: str) -> None:
+                entry = {"step": step, "detail": detail}
+                self.last_steps.append(entry)
+                await self.bus.publish("agent_step", entry)
+
             try:
-                web = await self.core.research.run(text)
+                web = await self.core.research.run(
+                    text, depth="deep" if multi_agent else "quick", on_step=report_step
+                )
                 web_block = web.block
                 self.last_sources = [{"title": s.title, "url": s.url} for s in web.sources]
             except ResearchUnavailable as exc:

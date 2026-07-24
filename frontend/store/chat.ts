@@ -27,6 +27,8 @@ export interface ChatMessage {
   kbSources?: string[];
   /** Phase 5 web citations (live from the done frame, like kbSources). */
   sources?: { title: string; url: string }[];
+  /** Phase 6 agent trace — accumulates via agent_step frames while streaming. */
+  steps?: { step: string; detail: string }[];
   streaming: boolean;
   error: boolean;
 }
@@ -52,9 +54,11 @@ interface ChatStore {
   ollamaAvailable: boolean;
   generating: boolean;
 
-  // internet research (Phase 5)
+  // internet research (Phase 5) & multi-agent loop (Phase 6)
   internet: boolean;
   setInternet: (v: boolean) => void;
+  multiAgent: boolean;
+  setMultiAgent: (v: boolean) => void;
   provider: string; // "ollama" | "openrouter" — shown in the health footer
 
   // voice (Phase 3)
@@ -148,6 +152,20 @@ export const useChat = create<ChatStore>((set, get) => {
         break;
       }
 
+      case "agent_step": {
+        // Phase 6: stack the orchestration trace onto the streaming assistant bubble
+        if (streamingId) {
+          set({
+            messages: messages.map((m) =>
+              m.id === streamingId
+                ? { ...m, steps: [...(m.steps ?? []), { step: frame.step, detail: frame.detail }] }
+                : m,
+            ),
+          });
+        }
+        break;
+      }
+
       case "message_done": {
         streamingId = null;
         set({
@@ -155,7 +173,7 @@ export const useChat = create<ChatStore>((set, get) => {
           messages: messages.map((m) =>
             m.id === frame.message_id
               ? { ...m, streaming: false, plugins: frame.plugins, kbSources: frame.kb_sources ?? [],
-                  sources: frame.sources ?? [] }
+                  sources: frame.sources ?? [], steps: frame.steps ?? m.steps }
               : m,
           ),
         });
@@ -220,6 +238,8 @@ export const useChat = create<ChatStore>((set, get) => {
 
     internet: false,
     setInternet: (v) => set({ internet: v }),
+    multiAgent: false,
+    setMultiAgent: (v) => set({ multiAgent: v }),
     provider: "ollama",
     setVoiceState: (v) => set({ voiceState: v }),
     setVoiceReplies: (on) => {
@@ -355,7 +375,7 @@ export const useChat = create<ChatStore>((set, get) => {
         });
         return;
       }
-      const { activeId, activeModel, temperature, internet, conversations } = get();
+      const { activeId, activeModel, temperature, internet, multiAgent, conversations } = get();
       const conv = conversations.find((c) => c.id === activeId);
       const prompt =
         text ||
@@ -381,6 +401,7 @@ export const useChat = create<ChatStore>((set, get) => {
         temperature,
         attachments: drafts.map((d) => d.id),
         internet,
+        multi_agent: multiAgent,
       });
     },
 

@@ -30,7 +30,7 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 ### Client → Server
 ```jsonc
 {"type":"user_message","content":"…","conversation_id":null,"model":null,"language":null,
- "temperature":0.7,"attachments":["<upload id>", "…"],"internet":true}
+ "temperature":0.7,"attachments":["<upload id>", "…"],"internet":true,"multi_agent":true}
 // conversation_id omitted → a new "New chat" is created and announced
 // model/language/temperature override the conversation's settings for this message (language persists)
 // attachments: ids from POST /api/uploads (≤5). Unknown id → attachment_not_found error, nothing sent.
@@ -38,6 +38,9 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 // (notice "🖼 Routed images to …" when auto-switched, clear guidance when no vision model is local).
 // internet: runs the LangGraph research agent (plan→search→fetch) over SearXNG and cites the
 // results into the streamed answer; orb shows SEARCHING; failures degrade to honest guidance.
+// multi_agent (Phase 6): upgrades to the deep graph — planner decomposes into sub-questions,
+// researcher searches+reads, critic checks coverage and loops refine→search until covered or
+// VEDNIX_AGENTS_MAX_ITERATIONS (default 2) — implies web research even when internet=false.
 // Note: deterministic plugins (time/system/memory) answer before the research/web path — by design.
 {"type":"cancel"}    // stop current generation; partial text persists with *(stopped)*
 {"type":"ping"}      // → pong
@@ -48,10 +51,13 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 {"type":"conversation_created","conversation_id":"…","title":"New chat"}
 {"type":"state_changed","state":"THINKING"}     // IDLE|LISTENING|THINKING|SPEAKING|EXECUTING|SEARCHING|LEARNING|UPDATING — drive the orb
 {"type":"message_started","message_id":"…","conversation_id":"…"}
+{"type":"agent_step","step":"plan|search|fetch|critique|refine|build","detail":"…"} // Phase 6 loop, streamed live
 {"type":"token","message_id":"…","content":"…"} // raw LLM/plugin chunks, concatenate
 {"type":"message_done","message_id":"…","conversation_id":"…","plugins":["time"],"kb_sources":["Launch Plan"],
- "sources":[{"title":"Vednix Docs","url":"https://…"}],"cancelled":false}
+ "sources":[{"title":"Vednix Docs","url":"https://…"}],
+ "steps":[{"step":"plan","detail":"planner decomposing the question"}],"cancelled":false}
 // sources: web citations from an internet turn (empty otherwise)
+// steps: the agent trace of a research turn (Phase 6), same order as streamed agent_step frames
 {"type":"title_updated","conversation_id":"…","title":"…"}  // after first exchange
 {"type":"error","code":"busy|rate_limited|too_long|invalid|bad_payload|nothing_to_cancel|attachment_not_found","message":"…"}
 {"type":"pong"}

@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     search_page_chars: int = 6000
     search_timeout: float = 12.0
 
+    # --- Multi-agent deep research (Phase 6): bounded loops, honest cost ---
+    agents_max_iterations: int = 2      # critique→refine rounds (cap guarantees termination)
+    agents_max_subquestions: int = 4    # planner fan-out cap per turn
+
     # --- Infra switches (Phase 5): all opt-in, local defaults unchanged ---
     redis_url: str = ""  # empty → in-process rate limiting
     auth_token: str = ""  # empty → open local mode (single-user default)

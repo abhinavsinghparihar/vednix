@@ -226,6 +226,8 @@ export function ControlPanel() {
   const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature } = useChat();
   const internet = useChat((s) => s.internet);
   const setInternet = useChat((s) => s.setInternet);
+  const multiAgent = useChat((s) => s.multiAgent);
+  const setMultiAgent = useChat((s) => s.setMultiAgent);
   const activeConv = useChat((s) => s.conversations.find((c) => c.id === s.activeId));
   const setLanguage = useChat((s) => s.setLanguage);
 
@@ -303,15 +305,14 @@ export function ControlPanel() {
                   <span className="flex items-center gap-2.5 text-sm text-muted">
                     <Bot className="h-4 w-4" /> Multi-agent mode
                   </span>
-                  <span className="flex items-center gap-2">
-                    <Badge>Phase 6</Badge>
-                    <Switch checked={false} disabled label="Multi-agent mode" />
-                  </span>
+                  <Switch checked={multiAgent} onCheckedChange={setMultiAgent} label="Multi-agent deep research" />
                 </div>
               </GlassPanel>
               <p className="text-[11px] leading-snug text-faint">
                 Internet search runs a LangGraph agent over your SearXNG instance and cites sources — it needs
                 connectivity + a reachable instance (self-hostable: docker run -p 8080:8080 searxng/searxng).
+                Multi-agent adds a planner, researcher and critic that search, read and refine in loops — slower,
+                deeper, and implies web research. Watch each agent step above the reply.
               </p>
             </Section>
 
