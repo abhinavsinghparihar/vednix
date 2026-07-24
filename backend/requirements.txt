@@ -1,0 +1,9 @@
+# Vednix AI — backend runtime dependencies (Python 3.11+)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+sqlalchemy[asyncio]>=2.0
+aiosqlite>=0.20
+pydantic>=2.7
+pydantic-settings>=2.3
+psutil>=5.9
