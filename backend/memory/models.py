@@ -54,11 +54,55 @@ class Message(Base):
     role: Mapped[str] = mapped_column(String(16))  # user | assistant
     content: Mapped[str] = mapped_column(Text)
     plugins: Mapped[str | None] = mapped_column(String(200), nullable=True)  # csv of plugin names
+    attachments: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of attachment refs
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
     __table_args__ = (Index("ix_messages_conv_created", "conversation_id", "created_at"),)
+
+
+class UploadedFile(Base):
+    """A file the user dropped into Vednix (chat attachment or KB source)."""
+
+    __tablename__ = "uploaded_files"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    name: Mapped[str] = mapped_column(String(255))
+    mime: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(24))  # document|sheet|slides|image|text|other
+    size: Mapped[int] = mapped_column(Integer)
+    path: Mapped[str] = mapped_column(String(500))  # absolute path of stored blob
+    text_path: Mapped[str | None] = mapped_column(String(500), nullable=True)  # extracted text cache
+    extracted_chars: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    title: Mapped[str] = mapped_column(String(255))
+    uploaded_file_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    chunks: Mapped[list["KnowledgeChunk"]] = relationship(
+        back_populates="document", cascade="all, delete-orphan"
+    )
+
+
+class KnowledgeChunk(Base):
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    document_id: Mapped[str] = mapped_column(
+        ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True
+    )
+    idx: Mapped[int] = mapped_column(Integer)
+    content: Mapped[str] = mapped_column(Text)
+
+    document: Mapped[KnowledgeDocument] = relationship(back_populates="chunks")
 
 
 class MemoryItem(Base):

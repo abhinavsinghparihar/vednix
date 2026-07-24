@@ -7,8 +7,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Paperclip, Mic, ArrowUp, Square, MicOff } from "lucide-react";
-import { MAX_CHARS, useChat, useDisplayCoreState } from "@/store/chat";
+import { Paperclip, Mic, ArrowUp, Square, MicOff, FileText, Image as ImageIcon, Table2, Presentation, FileCode, Loader2, X } from "lucide-react";
+import { MAX_CHARS, useChat, useDisplayCoreState, type AttachmentChip } from "@/store/chat";
 import { cn } from "@/lib/utils";
 import { Badge, Button } from "@/components/ui/primitives";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -21,12 +21,52 @@ function micLocale(language: string | undefined): string {
   return "hi-IN"; // auto: hi-IN recognizer handles Hindi + Hinglish + English
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+export function kindIcon(kind: string) {
+  switch (kind) {
+    case "image": return ImageIcon;
+    case "sheet": return Table2;
+    case "slides": return Presentation;
+    case "text": return FileCode;
+    default: return FileText;
+  }
+}
+
+export function AttachmentChipView({ att, onRemove }: { att: AttachmentChip; onRemove?: () => void }) {
+  const Icon = kindIcon(att.kind);
+  return (
+    <span className="glass group/chip flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-cream/85">
+      <Icon className="h-3.5 w-3.5 text-gold/80" />
+      <span className="max-w-[160px] truncate">{att.name}</span>
+      <span className="text-faint">{formatBytes(att.size)}</span>
+      {onRemove && (
+        <button
+          aria-label={`Remove ${att.name}`}
+          onClick={onRemove}
+          className="rounded-full p-0.5 text-faint transition-colors hover:bg-white/10 hover:text-danger"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </span>
+  );
+}
+
 export function Composer() {
-  const { send, stop, generating, wsStatus, activeId, conversations, setVoiceState } = useChat();
+  const {
+    send, stop, generating, wsStatus, activeId, conversations, setVoiceState,
+    draftAttachments, uploadingCount, uploadDrafts, removeDraftAttachment,
+  } = useChat();
   const coreState = useDisplayCoreState();
   const convLang = conversations.find((c) => c.id === activeId)?.language;
   const [value, setValue] = useState("");
   const areaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const stt = useSpeechRecognition();
   const baseTextRef = useRef("");
 
@@ -85,6 +125,13 @@ export function Composer() {
   return (
     <div className="px-4 pb-5 pt-1 md:px-8">
       <div className="mx-auto max-w-3xl">
+        {draftAttachments.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-2">
+            {draftAttachments.map((att) => (
+              <AttachmentChipView key={att.id} att={att} onRemove={() => removeDraftAttachment(att.id)} />
+            ))}
+          </div>
+        )}
         <div
           className={cn(
             "glass-strong flex items-end gap-2 rounded-3xl p-3 transition-shadow duration-300",
@@ -92,13 +139,31 @@ export function Composer() {
             generating && "border-[rgba(227,184,87,0.3)]",
           )}
         >
-          {/* attach — Phase 4 */}
+          {/* attach — Phase 4, real: PDF/DOCX/XLSX/CSV/PPTX/text/images */}
           <div className="group relative">
-            <Button size="icon" variant="ghost" aria-label="Attach file (Phase 4)" disabled>
-              <Paperclip className="h-4 w-4" />
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              hidden
+              accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx,.png,.jpg,.jpeg,.webp,.gif,.bmp,.json,.py,.js,.ts,.tsx,.html,.css,.sql,.log,.yaml,.yml"
+              onChange={(e) => {
+                if (e.target.files?.length) void uploadDrafts(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <Button
+              size="icon"
+              variant="ghost"
+              aria-label="Attach files"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploadingCount > 0}
+              className={cn(draftAttachments.length > 0 && "text-gold")}
+            >
+              {uploadingCount > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
             </Button>
-            <Badge className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 opacity-0 transition-opacity group-hover:opacity-100">
-              Phase 4
+            <Badge className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap opacity-0 transition-opacity group-hover:opacity-100">
+              PDF · DOCX · XLSX · PPTX · CSV · images
             </Badge>
           </div>
 

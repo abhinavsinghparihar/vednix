@@ -13,7 +13,7 @@ export type ServerFrame =
   | { type: "state_changed"; state: CoreStateName }
   | { type: "message_started"; message_id: string; conversation_id: string }
   | { type: "token"; message_id: string; content: string }
-  | { type: "message_done"; message_id: string; conversation_id: string; plugins: string[]; cancelled: boolean }
+  | { type: "message_done"; message_id: string; conversation_id: string; plugins: string[]; kb_sources?: string[]; cancelled: boolean }
   | { type: "conversation_created"; conversation_id: string; title: string }
   | { type: "title_updated"; conversation_id: string; title: string }
   | { type: "error"; code: string; message: string }
@@ -26,6 +26,7 @@ export interface OutgoingUserMessage {
   model?: string | null;
   language?: Language | null;
   temperature?: number | null;
+  attachments?: string[];
 }
 
 export type WSStatus = "connecting" | "open" | "closed";

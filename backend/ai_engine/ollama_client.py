@@ -78,9 +78,36 @@ class OllamaClient:
         except (httpx.HTTPError, ValueError) as exc:
             raise OllamaError(f"Could not list models at {self.host}: {exc}") from exc
 
+    async def list_models_cached(self, ttl: float = 30.0) -> list[str]:
+        """Cached model list for routing decisions (vision auto-select)."""
+        now = time.monotonic()
+        if now < getattr(self, "_models_until", 0.0):
+            return getattr(self, "_models_cache", [])
+        try:
+            models = await self.list_models()
+        except OllamaError:
+            models = []
+        self._models_cache = models
+        self._models_until = now + ttl
+        return models
+
     # --- chat --------------------------------------------------------------
 
-    def _payload(self, messages: list[dict], temperature: float, model: str | None, stream: bool) -> dict[str, Any]:
+    def _payload(
+        self,
+        messages: list[dict],
+        temperature: float,
+        model: str | None,
+        stream: bool,
+        images: list[str] | None = None,
+    ) -> dict[str, Any]:
+        if images:
+            # Ollama vision contract: base64 images ride on the final user message
+            messages = [dict(m) for m in messages]
+            for i in range(len(messages) - 1, -1, -1):
+                if messages[i].get("role") == "user":
+                    messages[i]["images"] = images
+                    break
         return {
             "model": model or self.model,
             "messages": messages,
@@ -94,11 +121,12 @@ class OllamaClient:
         temperature: float,
         *,
         model: str | None = None,
+        images: list[str] | None = None,
     ) -> str:
         """Non-streaming call. Returns full response text. (Original interface.)"""
         try:
             resp = await self._client.post(
-                "/api/chat", json=self._payload(messages, temperature, model, stream=False)
+                "/api/chat", json=self._payload(messages, temperature, model, stream=False, images=images)
             )
             resp.raise_for_status()
             data = resp.json()
@@ -116,6 +144,7 @@ class OllamaClient:
         temperature: float,
         *,
         model: str | None = None,
+        images: list[str] | None = None,
     ) -> AsyncIterator[str]:
         """Streaming call. Yields text chunks as they arrive. (Original interface.)
 
@@ -124,7 +153,8 @@ class OllamaClient:
         """
         try:
             async with self._client.stream(
-                "POST", "/api/chat", json=self._payload(messages, temperature, model, stream=True)
+                "POST", "/api/chat",
+                json=self._payload(messages, temperature, model, stream=True, images=images),
             ) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():

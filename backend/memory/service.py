@@ -28,7 +28,9 @@ class MemoryService:
             conv = Conversation(title=title, language=language)
             session.add(conv)
             await session.commit()
-            await session.refresh(conv)
+            # no refresh(): expire_on_commit=False and every field has a client-side
+            # default, so the instance is fully populated; refresh was a redundant
+            # SELECT that could only fail post-commit.
             return conv
 
     async def get_conversation(self, conversation_id: str) -> Conversation | None:
@@ -55,7 +57,6 @@ class MemoryService:
                 setattr(conv, key, value)
             conv.updated_at = datetime.now(timezone.utc)
             await session.commit()
-            await session.refresh(conv)
             return conv
 
     async def delete_conversation(self, conversation_id: str) -> bool:
@@ -81,16 +82,24 @@ class MemoryService:
     # --- messages ------------------------------------------------------------
 
     async def add_message(
-        self, conversation_id: str, role: str, content: str, *, plugins: str | None = None
+        self,
+        conversation_id: str,
+        role: str,
+        content: str,
+        *,
+        plugins: str | None = None,
+        attachments: str | None = None,
     ) -> Message:
         async with self._sessions() as session:
-            msg = Message(conversation_id=conversation_id, role=role, content=content, plugins=plugins)
+            msg = Message(
+                conversation_id=conversation_id, role=role, content=content,
+                plugins=plugins, attachments=attachments,
+            )
             session.add(msg)
             conv = await session.get(Conversation, conversation_id)
             if conv is not None:
                 conv.updated_at = datetime.now(timezone.utc)
             await session.commit()
-            await session.refresh(msg)
             return msg
 
     async def recent_history(self, conversation_id: str, *, max_turns: int) -> list[dict]:
@@ -123,7 +132,7 @@ class MemoryService:
             item = MemoryItem(kind=kind, content=content)
             session.add(item)
             await session.commit()
-            await session.refresh(item)
+            # autoincrement PK is populated at INSERT (cursor.lastrowid); no refresh needed
             return item.id
 
     async def search(self, query: str, kind: str | None = None, limit: int = 10) -> list[MemoryItem]:

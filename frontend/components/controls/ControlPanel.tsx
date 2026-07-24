@@ -10,11 +10,11 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BrainCircuit, Globe, ImageIcon, Volume2, Trash2, ChevronDown, Play } from "lucide-react";
+import { BrainCircuit, Globe, Volume2, Trash2, ChevronDown, Play, BookOpen, FileText, RefreshCw } from "lucide-react";
 import { useChat } from "@/store/chat";
-import { api, type MemoryItem } from "@/lib/api";
+import { api, type KnowledgeDoc, type MemoryItem } from "@/lib/api";
 import type { Language } from "@/lib/ws";
 import { tts } from "@/lib/tts";
 import { cn } from "@/lib/utils";
@@ -77,6 +77,75 @@ function MemorySection() {
   );
 }
 
+function KnowledgeSection() {
+  const [docs, setDocs] = useState<KnowledgeDoc[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const refresh = () => api.listKnowledgeDocs().then(setDocs).catch(() => setDocs([]));
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const addFiles = async (files: FileList) => {
+    setBusy(true);
+    try {
+      const uploaded = await api.uploadFiles(Array.from(files));
+      for (const u of uploaded) {
+        await api.addKnowledgeDoc({ uploaded_file_id: u.id, title: u.name });
+      }
+      await refresh();
+    } catch { /* surfaced via console; panel stays usable */ } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title="Knowledge base">
+      <input
+        ref={fileRef}
+        type="file"
+        hidden
+        multiple
+        accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx"
+        onChange={(e) => {
+          if (e.target.files?.length) void addFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <GlassPanel className="space-y-2 p-3">
+        <p className="text-[11px] leading-snug text-faint">
+          Documents here are searched automatically and cited into answers (FTS5, offline).
+        </p>
+        <Button variant="subtle" size="sm" className="w-full" disabled={busy} onClick={() => fileRef.current?.click()}>
+          {busy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <BookOpen className="h-3 w-3" />}
+          Add document…
+        </Button>
+        {docs === null ? (
+          <div className="skeleton h-8 w-full" />
+        ) : docs.length === 0 ? (
+          <p className="text-[11px] text-faint">Empty — index a handbook, notes, or a spec.</p>
+        ) : (
+          docs.slice(0, 6).map((d) => (
+            <div key={d.id} className="group flex items-center gap-2 text-xs">
+              <FileText className="h-3 w-3 shrink-0 text-gold/70" />
+              <span className="min-w-0 flex-1 truncate text-cream/80">{d.title}</span>
+              <span className="shrink-0 text-faint">{d.chunk_count} chunks</span>
+              <button
+                aria-label={`Remove ${d.title}`}
+                className="opacity-0 transition-opacity group-hover:opacity-100"
+                onClick={() => void api.deleteKnowledgeDoc(d.id).then(refresh)}
+              >
+                <Trash2 className="h-3 w-3 text-muted hover:text-danger" />
+              </button>
+            </div>
+          ))
+        )}
+      </GlassPanel>
+    </Section>
+  );
+}
+
 function RoadmapSwitch({ icon: Icon, label, phase }: { icon: typeof Globe; label: string; phase: string }) {
   return (
     <div className="flex items-center justify-between rounded-xl px-1 py-1.5">
@@ -93,7 +162,9 @@ function RoadmapSwitch({ icon: Icon, label, phase }: { icon: typeof Globe; label
 
 function VoiceSection() {
   const { voiceReplies, setVoiceReplies, voiceRate, setVoiceRate } = useChat();
-  const [ttsSupported] = useState(() => tts.supported);
+  // post-mount capability check (avoids hydration mismatch from speechSynthesis)
+  const [ttsSupported, setTtsSupported] = useState(false);
+  useEffect(() => setTtsSupported(tts.supported), []);
 
   return (
     <Section title="Voice">
@@ -214,13 +285,25 @@ export function ControlPanel() {
 
             <MemorySection />
 
+            <KnowledgeSection />
+
             <VoiceSection />
 
             <Section title="Capabilities">
               <GlassPanel className="space-y-0.5 p-2">
-                <RoadmapSwitch icon={Globe} label="Internet search" phase="Phase 5" />
-                <RoadmapSwitch icon={ImageIcon} label="Vision · OCR" phase="Phase 4" />
+                <div className="flex items-center justify-between rounded-xl px-1 py-1.5">
+                  <span className="flex items-center gap-2.5 text-sm text-muted">
+                    <Globe className="h-4 w-4" /> Internet search
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Badge>Phase 5</Badge>
+                    <Switch checked={false} disabled label="Internet search" />
+                  </span>
+                </div>
               </GlassPanel>
+              <p className="text-[11px] leading-snug text-faint">
+                Files & vision are live via the 📎 attach button — images auto-route to a local vision model.
+              </p>
             </Section>
 
             <p className="mt-auto text-center text-[10px] text-faint">

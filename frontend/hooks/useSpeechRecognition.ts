@@ -22,13 +22,14 @@ interface UseSTT {
 
 export function useSpeechRecognition(): UseSTT {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const [status, setStatus] = useState<STTStatus>(() =>
-    typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition)
-      ? "idle"
-      : "unsupported",
-  );
+  // SSR-consistent: "idle" everywhere; real capability lands after mount
+  // (this mismatch was React hydration error #418)
+  const [status, setStatus] = useState<STTStatus>("idle");
 
   useEffect(() => {
+    if (!(window.SpeechRecognition || window.webkitSpeechRecognition)) {
+      setStatus("unsupported");
+    }
     return () => recognitionRef.current?.abort();
   }, []);
 

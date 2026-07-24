@@ -10,8 +10,12 @@ Replaces dev_ai/config.py. Differences from the original:
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_BACKEND_ROOT = Path(__file__).resolve().parent
 
 
 class Settings(BaseSettings):
@@ -29,7 +33,7 @@ class Settings(BaseSettings):
     # --- Server ---
     host: str = "127.0.0.1"
     port: int = 8000
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"  # both loopback forms
 
     # --- Database ---
     database_url: str = "sqlite+aiosqlite:///./data/vednix.db"
@@ -39,12 +43,46 @@ class Settings(BaseSettings):
     history_max_turns: int = 40  # max messages fed back as context (was hardcoded 20 RAM-only)
     memory_context_items: int = 5  # long-term facts injected into the system prompt
 
+    # --- Files & knowledge (Phase 4) ---
+    upload_dir: str = "./data/uploads"
+    upload_max_mb: int = 15
+    file_context_max_chars: int = 16_000  # per-file budget injected into the LLM turn
+    vision_model_keywords: str = "vision,vl,minicpm-v,moondream,gemma3"  # matched against model names
+    kb_chunk_chars: int = 900
+    kb_chunk_overlap: int = 150
+    kb_context_chunks: int = 4
+
     # --- Persona ---
     assistant_name: str = "Vednix AI"
+
+    @model_validator(mode="after")
+    def _absolutize_local_paths(self) -> "Settings":
+        """Anchor relative paths to the backend root.
+
+        The SQLite file and upload dir must be identical no matter which
+        directory the server is launched from — otherwise two processes
+        started from different CWDs silently read/write *different* database
+        files (observed live: split-brain persistence, orphaned uploads).
+        Absolute paths (tests, deployments) pass through untouched.
+        """
+        scheme, sep, rel = self.database_url.partition(":///")
+        if sep and rel and rel != ":memory:" and not Path(rel).is_absolute():
+            self.database_url = f"{scheme}:///{_BACKEND_ROOT / rel}"
+        if not Path(self.upload_dir).is_absolute():
+            self.upload_dir = str(_BACKEND_ROOT / self.upload_dir)
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def vision_keywords_list(self) -> list[str]:
+        return [k.strip().lower() for k in self.vision_model_keywords.split(",") if k.strip()]
+
+    def is_vision_model(self, model_name: str) -> bool:
+        name = model_name.lower()
+        return any(k in name for k in self.vision_keywords_list)
 
     @property
     def default_system_prompt(self) -> str:

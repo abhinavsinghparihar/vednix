@@ -31,7 +31,9 @@ def routing_manager() -> PluginManager:
     "what’s the date",            # smart quote (audit B6)
     "time kya hai",               # Hinglish
     "kitne baje hain",
+    "kitna baj raha hai",         # colloquial Hinglish (live e2e finding)
     "अभी समय क्या है",            # Devanagari
+    "अभी कितना बज रहा है?",        # colloquial Devanagari (live e2e finding)
     "aaj ki date batao",
 ])
 def test_time_plugin_routes_localized(text):

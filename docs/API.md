@@ -16,6 +16,12 @@ Base URL: `http://localhost:8000` · Interactive docs: `/docs` (OpenAPI)
 | GET | `/api/memory?query=&kind=&limit=` | Search long-term memory |
 | POST | `/api/memory` | `{content, kind: note\|preference\|project\|task}` → 201 |
 | DELETE | `/api/memory/{id}` | Forget → 204 |
+| POST | `/api/uploads` | multipart `files` (≤5/batch, ≤15 MB each) → **201** `[{id, name, kind, mime, size, extracted_chars, created_at}]`. Text-bearing kinds (pdf/docx/xlsx/csv/pptx/txt/code) are extracted eagerly and cached; images are stored for vision routing. |
+| GET | `/api/uploads/{id}` | Upload metadata → 404 when unknown |
+| POST | `/api/knowledge/documents` | `{title, text}` *or* `{title, uploaded_file_id}` → 201 `{id, title, chunk_count, …}` — chunked (900 chars, 150 overlap) + mirrored into FTS5 |
+| GET | `/api/knowledge/documents` | List knowledge documents |
+| DELETE | `/api/knowledge/documents/{id}` | Removes doc + chunks + FTS rows → 204 |
+| GET | `/api/knowledge/search?q=` | `{query, hits:[{document, chunk_id, snippet («term» marks), score}]}` — FTS5 OR + bm25; LIKE fallback when FTS5 unavailable |
 
 Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) trips.
 
@@ -23,9 +29,13 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 
 ### Client → Server
 ```jsonc
-{"type":"user_message","content":"…","conversation_id":null,"model":null,"language":null}
+{"type":"user_message","content":"…","conversation_id":null,"model":null,"language":null,
+ "temperature":0.7,"attachments":["<upload id>", "…"]}
 // conversation_id omitted → a new "New chat" is created and announced
-// model/language override the conversation's settings for this message (language persists)
+// model/language/temperature override the conversation's settings for this message (language persists)
+// attachments: ids from POST /api/uploads (≤5). Unknown id → attachment_not_found error, nothing sent.
+// Known file kinds inject extracted text into the turn; images route to a vision model automatically
+// (notice "🖼 Routed images to …" when auto-switched, clear guidance when no vision model is local).
 {"type":"cancel"}    // stop current generation; partial text persists with *(stopped)*
 {"type":"ping"}      // → pong
 ```
@@ -36,9 +46,9 @@ Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) t
 {"type":"state_changed","state":"THINKING"}     // IDLE|LISTENING|THINKING|SPEAKING|EXECUTING|SEARCHING|LEARNING|UPDATING — drive the orb
 {"type":"message_started","message_id":"…","conversation_id":"…"}
 {"type":"token","message_id":"…","content":"…"} // raw LLM/plugin chunks, concatenate
-{"type":"message_done","message_id":"…","conversation_id":"…","plugins":["time"],"cancelled":false}
+{"type":"message_done","message_id":"…","conversation_id":"…","plugins":["time"],"kb_sources":["Launch Plan"],"cancelled":false}
 {"type":"title_updated","conversation_id":"…","title":"…"}  // after first exchange
-{"type":"error","code":"busy|rate_limited|too_long|invalid|bad_payload|nothing_to_cancel","message":"…"}
+{"type":"error","code":"busy|rate_limited|too_long|invalid|bad_payload|nothing_to_cancel|attachment_not_found","message":"…"}
 {"type":"pong"}
 ```
 

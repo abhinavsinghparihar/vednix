@@ -21,12 +21,14 @@ from agents import build_plugins
 from agents.plugin_manager import PluginManager
 from ai_engine.engine import EngineCore
 from ai_engine.ollama_client import OllamaClient
-from api import conversations, health, memories, ws_chat
+from api import conversations, health, knowledge, memories, uploads, ws_chat
 from config import Settings, get_settings
 from core.logging import get_logger, setup_logging
 from core.rate_limit import RateLimiter
 from memory.db import create_engine_and_session, init_schema
 from memory.service import MemoryService
+from services.file_store import FileStore
+from services.knowledge import KnowledgeService
 
 logger = get_logger(__name__)
 
@@ -47,11 +49,13 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         setup_logging()
         _ensure_sqlite_dir(settings.database_url)
         db_engine, session_factory = create_engine_and_session(settings.database_url)
-        await init_schema(db_engine)
+        fts_enabled = await init_schema(db_engine)
 
         app.state.settings = settings
         app.state.memory = MemoryService(session_factory)
         app.state.rate_limiter = RateLimiter(rate=120, per_seconds=60.0)
+        app.state.files = FileStore(session_factory, settings)
+        app.state.knowledge = KnowledgeService(session_factory, fts_enabled=fts_enabled)
         llm = llm_client or OllamaClient(
             settings.ollama_host,
             settings.ollama_model,
@@ -59,9 +63,13 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             health_ttl=settings.llm_health_ttl,
         )
         app.state.core = EngineCore(
-            settings=settings, llm=llm, plugins=PluginManager(build_plugins())
+            settings=settings, llm=llm, plugins=PluginManager(build_plugins()),
+            files=app.state.files, knowledge=app.state.knowledge,
         )
-        logger.info("Vednix AI backend ready (model=%s)", settings.ollama_model)
+        logger.info(
+            "Vednix AI backend ready (model=%s, fts5=%s, db=%s, uploads=%s)",
+            settings.ollama_model, fts_enabled, settings.database_url, settings.upload_dir,
+        )
         try:
             yield
         finally:
@@ -89,6 +97,8 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
     app.include_router(health.router, prefix="/api")
     app.include_router(conversations.router, prefix="/api")
     app.include_router(memories.router, prefix="/api")
+    app.include_router(uploads.router, prefix="/api")
+    app.include_router(knowledge.router, prefix="/api")
     app.include_router(ws_chat.router)
     return app
 

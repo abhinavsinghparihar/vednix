@@ -18,6 +18,8 @@ from ai_engine.ollama_client import OllamaError
 from config import Settings
 from memory.db import create_engine_and_session, init_schema
 from memory.service import MemoryService
+from services.file_store import FileStore
+from services.knowledge import KnowledgeService
 
 
 class FakeLLM:
@@ -40,22 +42,28 @@ class FakeLLM:
     async def aclose(self) -> None:  # symmetry with OllamaClient
         return None
 
-    async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None) -> str:
+    async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None) -> str:
         self.calls.append(messages)
+        self.last_images = images
         if self.fail_chat:
             raise OllamaError("fake llm failure")
         return "Test Conversation Title"
 
     async def chat_stream(
-        self, messages: list[dict], temperature: float, *, model: str | None = None
+        self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None
     ) -> AsyncIterator[str]:
         self.calls.append(messages)
         self.temperatures.append(temperature)
+        self.last_images = images
+        self.last_model = model
         if self.fail_chat:
             raise OllamaError("fake llm failure")
             yield  # pragma: no cover — keeps this an async generator
         for chunk in ["Hello ", "from ", "Vednix!"]:
             yield chunk
+
+    async def list_models_cached(self, ttl: float = 30.0) -> list[str]:
+        return ["fake-model"]
 
 
 class SlowLLM(FakeLLM):
@@ -65,8 +73,9 @@ class SlowLLM(FakeLLM):
         super().__init__()
         self.gate = asyncio.Event()
 
-    async def chat_stream(self, messages, temperature, *, model=None):
+    async def chat_stream(self, messages, temperature, *, model=None, images=None):
         self.calls.append(messages)
+        self.last_images = images
         yield "partial "
         await self.gate.wait()
         yield "rest"
@@ -78,23 +87,39 @@ def settings(tmp_path) -> Settings:
         database_url=f"sqlite+aiosqlite:///{tmp_path}/test.db",
         ollama_model="fake-model",
         llm_health_ttl=0.0,
+        upload_dir=str(tmp_path / "uploads"),
     )
 
 
 @pytest_asyncio.fixture
-async def memory(settings) -> MemoryService:
+async def db(settings):
+    """One engine+session factory per test, shared by every service."""
     engine, session_factory = create_engine_and_session(settings.database_url)
     await init_schema(engine)
-    service = MemoryService(session_factory)
-    yield service
+    yield engine, session_factory
     await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def memory(db) -> MemoryService:
+    return MemoryService(db[1])
+
+
+@pytest_asyncio.fixture
+async def files_store(db, settings):
+    return FileStore(db[1], settings)
+
+
+@pytest_asyncio.fixture
+async def knowledge(db):
+    return KnowledgeService(db[1], fts_enabled=True)
 
 
 @pytest.fixture
 def core(settings):
-    """Factory: core_for(llm) builds an EngineCore around any fake LLM."""
+    """Factory: core_for(llm, files=..., knowledge=...) builds an EngineCore."""
 
-    def core_for(llm) -> EngineCore:
-        return EngineCore(settings=settings, llm=llm, plugins=PluginManager(build_plugins()))
+    def core_for(llm, **kwargs) -> EngineCore:
+        return EngineCore(settings=settings, llm=llm, plugins=PluginManager(build_plugins()), **kwargs)
 
     return core_for

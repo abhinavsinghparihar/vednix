@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from api.deps import get_memory
@@ -26,7 +28,16 @@ def _conv_out(c: Conversation) -> ConversationOut:
 
 
 def _msg_out(m: Message) -> MessageOut:
-    return MessageOut(id=m.id, role=m.role, content=m.content, plugins=m.plugins, created_at=m.created_at)
+    attachments = None
+    if m.attachments:
+        try:
+            attachments = json.loads(m.attachments)
+        except (ValueError, TypeError):
+            attachments = None
+    return MessageOut(
+        id=m.id, role=m.role, content=m.content, plugins=m.plugins,
+        attachments=attachments, created_at=m.created_at,
+    )
 
 
 @router.get("", response_model=list[ConversationOut])

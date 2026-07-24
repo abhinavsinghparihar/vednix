@@ -8,7 +8,7 @@ Postgres is a one-line change later (audit SC4).
 
 from __future__ import annotations
 
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 from memory.models import Base
@@ -30,6 +30,23 @@ def create_engine_and_session(database_url: str) -> tuple[AsyncEngine, async_ses
     return engine, session_factory
 
 
-async def init_schema(engine: AsyncEngine) -> None:
+async def init_schema(engine: AsyncEngine) -> bool:
+    """Create all tables; run light migrations; build the FTS5 mirror.
+
+    Returns True when FTS5 is available (knowledge search runs full-text),
+    False when the local sqlite build lacks it (search falls back to LIKE).
+    """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # light, additive migrations for running installs
+        if engine.url.get_backend_name() == "sqlite":
+            cols = {row[1] for row in (await conn.execute(text("PRAGMA table_info(messages)"))).all()}
+            if "attachments" not in cols:
+                await conn.execute(text("ALTER TABLE messages ADD COLUMN attachments TEXT"))
+        try:
+            await conn.execute(
+                text("CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(chunk_id UNINDEXED, content)")
+            )
+            return True
+        except Exception:
+            return False

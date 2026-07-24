@@ -30,7 +30,7 @@ import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from ai_engine.engine import EngineCore, EngineSession
+from ai_engine.engine import AttachmentRef, EngineCore, EngineSession
 from api.schemas import WSUserMessage
 from core.logging import get_logger
 from core.rate_limit import TokenBucket
@@ -93,6 +93,7 @@ async def _stream_reply(
     text: str,
     model: str | None,
     temperature: float | None,
+    attachments: list[AttachmentRef],
 ) -> None:
     async def forward_state(state) -> None:
         await sender.send({"type": "state_changed", "state": state.name})
@@ -103,7 +104,9 @@ async def _stream_reply(
         await sender.send(
             {"type": "message_started", "message_id": message_id, "conversation_id": session.conversation_id}
         )
-        async for chunk in session.stream_reply(text, model=model, temperature=temperature):
+        async for chunk in session.stream_reply(
+            text, model=model, temperature=temperature, attachments=attachments
+        ):
             partial.append(chunk)
             await sender.send({"type": "token", "message_id": message_id, "content": chunk})
     except asyncio.CancelledError:
@@ -122,6 +125,7 @@ async def _stream_reply(
             "message_id": message_id,
             "conversation_id": session.conversation_id,
             "plugins": session.last_plugins,
+            "kb_sources": session.last_kb_sources,
             "cancelled": False,
         }
     )
@@ -180,6 +184,26 @@ async def ws_chat(ws: WebSocket) -> None:
                     await sender.send({"type": "error", "code": "invalid", "message": str(exc)})
                     continue
 
+                # Resolve attachments (uploaded earlier via POST /api/uploads).
+                attachment_refs: list[AttachmentRef] = []
+                if payload.attachments:
+                    files_store = getattr(ws.app.state, "files", None)
+                    missing = False
+                    for file_id in payload.attachments[:5]:
+                        record = await files_store.get(file_id) if files_store else None
+                        if record is None:
+                            await sender.send(
+                                {"type": "error", "code": "attachment_not_found",
+                                 "message": f"An attachment ({file_id[:8]}…) no longer exists — re-upload it."}
+                            )
+                            missing = True
+                            break
+                        attachment_refs.append(
+                            AttachmentRef(id=record.id, name=record.name, kind=record.kind, size=record.size)
+                        )
+                    if missing:
+                        continue
+
                 # Resolve or create the conversation.
                 conv = await memory.get_conversation(payload.conversation_id) if payload.conversation_id else None
                 if conv is None:
@@ -202,7 +226,7 @@ async def ws_chat(ws: WebSocket) -> None:
                 stream_task = asyncio.create_task(
                     _stream_reply(
                         session, sender, message_id, text,
-                        payload.model or conv.model, payload.temperature,
+                        payload.model or conv.model, payload.temperature, attachment_refs,
                     )
                 )
                 if first_exchange:

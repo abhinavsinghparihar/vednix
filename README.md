@@ -14,7 +14,7 @@ Vednix answers in **your language** — Hindi, Hinglish, English, anything.
 | 1 | **Backend**: FastAPI · async Ollama · WS streaming · plugins · memory | ✅ **53/53 tests** |
 | 2 | **Frontend**: Next.js premium UI · AI Orb · glass studio | ✅ **built + visually verified** |
 | 3 | **Voice**: dictation (hi-IN aware) · TTS replies · LISTENING/SPEAKING orb | ✅ built + verified |
-| 4 | Files, vision, knowledge base | ⏭️ next |
+| 4 | **Files · vision · knowledge**: uploads (7 kinds) → LLM context, image→vision-model routing, FTS5 knowledge base cited into answers | ✅ **79/79 tests · browser-verified** |
 | 5 | Agents, OpenRouter, Postgres, Redis, Docker | planned |
 
 ## Quick start

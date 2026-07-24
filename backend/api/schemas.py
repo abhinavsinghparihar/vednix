@@ -28,6 +28,7 @@ class MessageOut(BaseModel):
     role: str
     content: str
     plugins: str | None
+    attachments: list[dict] | None = None
     created_at: datetime
 
 
@@ -69,6 +70,26 @@ class HealthOut(BaseModel):
     assistant: str
 
 
+# --- REST: uploads & knowledge (Phase 4) -----------------------------------------
+
+class UploadOut(BaseModel):
+    id: str
+    name: str
+    kind: str
+    mime: str
+    size: int
+    extracted_chars: int
+    created_at: datetime
+
+
+class KnowledgeDocOut(BaseModel):
+    id: str
+    title: str
+    chunk_count: int
+    uploaded_file_id: str | None
+    created_at: datetime
+
+
 # --- WebSocket payloads ----------------------------------------------------------
 
 class WSUserMessage(BaseModel):
@@ -79,6 +100,7 @@ class WSUserMessage(BaseModel):
     model: str | None = None
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    attachments: list[str] = Field(default_factory=list, max_length=5)  # uploaded file ids
 
 
 class WSCancel(BaseModel):

@@ -6,16 +6,25 @@
 "use client";
 
 import { create } from "zustand";
-import { api, WS_URL, type ConversationSummary } from "@/lib/api";
+import { api, WS_URL, type ConversationSummary, type UploadedFileMeta } from "@/lib/api";
 import { WSClient, type CoreStateName, type Language, type ServerFrame, type WSStatus } from "@/lib/ws";
 import { tts } from "@/lib/tts";
 import { detectSpeechLang, sanitizeForSpeech } from "@/lib/speechText";
+
+export interface AttachmentChip {
+  id: string;
+  name: string;
+  kind: string;
+  size: number;
+}
 
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   plugins: string[];
+  attachments?: AttachmentChip[];
+  kbSources?: string[];
   streaming: boolean;
   error: boolean;
 }
@@ -56,6 +65,12 @@ interface ChatStore {
   panelOpen: boolean;
   loadingConversations: boolean;
   loadingMessages: boolean;
+
+  // attachments (Phase 4)
+  draftAttachments: AttachmentChip[];
+  uploadingCount: number;
+  uploadDrafts: (files: FileList | File[]) => Promise<void>;
+  removeDraftAttachment: (id: string) => void;
 
   // actions
   bootstrap: () => Promise<void>;
@@ -131,7 +146,9 @@ export const useChat = create<ChatStore>((set, get) => {
         set({
           generating: false,
           messages: messages.map((m) =>
-            m.id === frame.message_id ? { ...m, streaming: false, plugins: frame.plugins } : m,
+            m.id === frame.message_id
+              ? { ...m, streaming: false, plugins: frame.plugins, kbSources: frame.kb_sources ?? [] }
+              : m,
           ),
         });
         void refreshConversations(set);
@@ -218,6 +235,38 @@ export const useChat = create<ChatStore>((set, get) => {
     loadingConversations: true,
     loadingMessages: false,
 
+    draftAttachments: [],
+    uploadingCount: 0,
+
+    uploadDrafts: async (incoming) => {
+      const list = Array.from(incoming);
+      if (!list.length) return;
+      const room = 5 - get().draftAttachments.length;
+      const batch = list.slice(0, Math.max(0, room));
+      if (!batch.length) return;
+      set({ uploadingCount: get().uploadingCount + batch.length });
+      try {
+        const uploaded = await api.uploadFiles(batch);
+        const chips: AttachmentChip[] = uploaded.map((u: UploadedFileMeta) => ({
+          id: u.id, name: u.name, kind: u.kind, size: u.size,
+        }));
+        set({ draftAttachments: [...get().draftAttachments, ...chips] });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : "Upload failed";
+        set({
+          messages: [
+            ...get().messages,
+            { id: `err-${Date.now()}`, role: "system", content: `⚠️ ${reason}`, plugins: [], streaming: false, error: true },
+          ],
+        });
+      } finally {
+        set({ uploadingCount: Math.max(0, get().uploadingCount - batch.length) });
+      }
+    },
+
+    removeDraftAttachment: (id) =>
+      set({ draftAttachments: get().draftAttachments.filter((a) => a.id !== id) }),
+
     bootstrap: async () => {
       ensureWs();
       try {
@@ -254,6 +303,7 @@ export const useChat = create<ChatStore>((set, get) => {
             role: m.role === "user" ? "user" : "assistant",
             content: m.content,
             plugins: m.plugins ? m.plugins.split(",") : [],
+            attachments: (m.attachments as AttachmentChip[] | null) ?? undefined,
             streaming: false,
             error: false,
           })),
@@ -271,7 +321,9 @@ export const useChat = create<ChatStore>((set, get) => {
 
     send: (raw) => {
       const text = raw.trim();
-      if (!text || get().generating || text.length > MAX_CHARS) return;
+      const drafts = get().draftAttachments;
+      if ((!text && drafts.length === 0) || get().generating || text.length > MAX_CHARS) return;
+      if (get().uploadingCount > 0) return; // chips must settle before send
       const client = ensureWs();
       if (!client || !client.isOpen) {
         set({
@@ -292,19 +344,29 @@ export const useChat = create<ChatStore>((set, get) => {
       }
       const { activeId, activeModel, temperature, conversations } = get();
       const conv = conversations.find((c) => c.id === activeId);
+      const prompt =
+        text ||
+        (drafts.length
+          ? "Analyze the attached file(s): summarize what's inside and answer inferred questions."
+          : "");
       set({
         generating: true,
+        draftAttachments: [],
         messages: [
           ...get().messages,
-          { id: `u-${Date.now()}`, role: "user", content: text, plugins: [], streaming: false, error: false },
+          {
+            id: `u-${Date.now()}`, role: "user", content: prompt, plugins: [],
+            attachments: drafts.length ? drafts : undefined, streaming: false, error: false,
+          },
         ],
       });
       client.send({
         type: "user_message",
-        content: text,
+        content: prompt,
         conversation_id: activeId,
         model: activeModel ?? conv?.model ?? null,
         temperature,
+        attachments: drafts.map((d) => d.id),
       });
     },
 

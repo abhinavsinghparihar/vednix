@@ -18,8 +18,9 @@ TRIGGERS = (
     "what time", "current time", "time now", "what's the time", "whats the time",
     "what's the date", "whats the date", "what is the date", "today's date", "todays date",
     "what day is it", "which day", "time kya", "samay kya", "kya samay", "kitne baje",
+    "kitna baj", "baj raha", "baj rahi",
     "kya time", "aaj kaun sa din", "aaj ki date", "aaj ka din",
-    "समय", "टाइम", "तारीख", "तिथि", "कितने बजे", "आज कौन सा दिन",
+    "समय", "टाइम", "तारीख", "तिथि", "कितने बजे", "बज रहा", "बज रही", "बज गए", "आज कौन सा दिन",
 )
 
 _NORMALIZE_RE = re.compile(r"[\u2018\u2019\u201c\u201d]")

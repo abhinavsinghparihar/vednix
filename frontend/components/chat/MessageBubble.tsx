@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { Orb } from "@/components/orb/Orb";
 import { Badge } from "@/components/ui/primitives";
+import { AttachmentChipView } from "@/components/composer/Composer";
+import { BookOpen } from "lucide-react";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -73,6 +75,13 @@ export const MessageBubble = memo(function MessageBubble({
       )}
 
       <div className={cn("flex min-w-0 max-w-[82%] flex-col", isUser && "items-end")}>
+        {message.attachments && message.attachments.length > 0 && (
+          <div className={cn("mb-1.5 flex flex-wrap gap-1.5", isUser && "justify-end")}>
+            {message.attachments.map((att) => (
+              <AttachmentChipView key={att.id} att={att} />
+            ))}
+          </div>
+        )}
         <div
           className={cn(
             "rounded-2xl px-4 py-3",
@@ -149,6 +158,11 @@ export const MessageBubble = memo(function MessageBubble({
           {message.plugins.length > 0 && (
             <Badge className="ml-1 border-white/10 bg-white/[0.04] text-muted normal-case">
               <Puzzle className="mr-1 h-2.5 w-2.5" />{message.plugins.join(" + ")}
+            </Badge>
+          )}
+          {message.kbSources && message.kbSources.length > 0 && (
+            <Badge className="ml-1 border-[rgba(227,184,87,0.3)] bg-[rgba(227,184,87,0.08)] text-gold/90 normal-case">
+              <BookOpen className="mr-1 h-2.5 w-2.5" />{message.kbSources.join(" · ")}
             </Badge>
           )}
         </div>

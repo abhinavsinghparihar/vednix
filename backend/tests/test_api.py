@@ -167,3 +167,59 @@ def test_ws_temperature_override_reaches_llm(settings):
             ws.send_json({"type": "user_message", "content": "hello", "temperature": 0.05})
             read_until(ws, "message_done")
     assert llm.temperatures == [0.05]  # control-panel slider is real, not decorative
+
+
+# --- Phase 4: uploads + knowledge over the real API --------------------------------
+
+def test_upload_rest_validation_and_extraction(settings):
+    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
+        # happy path
+        resp = client.post(
+            "/api/uploads",
+            files=[("files", ("facts.txt", b"Vednix uploads work.", "text/plain"))],
+        )
+        assert resp.status_code == 201
+        uploaded = resp.json()[0]
+        assert uploaded["kind"] == "text" and uploaded["extracted_chars"] > 0
+
+        preview = client.get(f"/api/uploads/{uploaded['id']}/text").json()
+        assert "Vednix uploads work." in preview["text"]
+
+        # unsupported type rejected with a user-readable reason
+        bad = client.post("/api/uploads", files=[("files", ("run.exe", b"MZ", "application/octet-stream"))])
+        assert bad.status_code == 422
+
+
+def test_ws_chat_with_attachment(settings):
+    llm = FakeLLM()
+    with TestClient(create_app(settings=settings, llm_client=llm)) as client:
+        uploaded = client.post(
+            "/api/uploads",
+            files=[("files", ("codes.txt", b"The launch code is KAVACH-1.", "text/plain"))],
+        ).json()[0]
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({
+                "type": "user_message",
+                "content": "what is the launch code?",
+                "attachments": [uploaded["id"]],
+            })
+            frames = read_until(ws, "message_done")
+            assert frames[-1]["cancelled"] is False
+    fed = llm.calls[0][-1]["content"]
+    assert "KAVACH-1" in fed and "### File: codes.txt" in fed
+
+
+def test_knowledge_rest_cycle(settings):
+    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
+        doc = client.post("/api/knowledge/documents", json={
+            "title": "Meeting Notes", "text": "The client call moved to Tuesday 3 PM. " * 8,
+        })
+        assert doc.status_code == 201
+        doc_id = doc.json()["id"]
+        assert doc.json()["chunk_count"] >= 1
+
+        found = client.get("/api/knowledge/search", params={"q": "client call"}).json()
+        assert found["hits"] and found["hits"][0]["document"] == "Meeting Notes"
+
+        assert client.get("/api/knowledge/documents").json()[0]["id"] == doc_id
+        assert client.delete(f"/api/knowledge/documents/{doc_id}").status_code == 204

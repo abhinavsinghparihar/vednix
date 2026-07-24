@@ -59,5 +59,20 @@ Every right-panel control is real: model → WS payload, temperature → WS payl
   `useDeferredValue`.
 - **A11y:** reduced-motion respected everywhere; aria labels on every control;
   keyboard-first composer.
-- **Honesty:** attach/mic/internet/vision toggles are visibly disabled with
-  phase badges — no fake features.
+- **Honesty:** internet/agents toggles remain visibly disabled with phase
+  badges — no fake features.
+
+## Phase 4 — files, vision & knowledge (shipped)
+
+- **Composer attach is real:** `input[type=file]` → immediate `POST /api/uploads`
+  → draft chips (name · human size · remove) above the input; send passes the
+  uploaded ids in `WSUserMessage.attachments`; sent chips render on the user
+  bubble from the persisted `attachments` JSON (survives reload).
+- **Drag & drop:** a page-level drop overlay accepts any supported file.
+- **Vision honesty:** images attach fine; the backend auto-routes to an
+  installed vision model with a `🖼 Routed images to …` notice, or replies with
+  an exact `ollama pull …` fix when none is local.
+- **Studio → Knowledge Base:** add document (file picker reuses the upload
+  pipeline: pdf/docx/xlsx/csv/pptx/txt/md), list with chunk counts, remove.
+  Hits injected into answers surface as `kb_sources` chips on the reply.
+- **Studio → Voice (Phase 3):** speak-replies toggle + speed slider + test.
