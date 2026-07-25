@@ -42,6 +42,10 @@ npm run dev                                            # → http://localhost:30
 Open **http://localhost:3000** — the landing ("The Living Core") greets you;
 **Launch App** (or the ask-capsule) enters the workspace at `/chat`.
 
+> Running dev alongside a served production build? Use
+> `NEXT_DIST_DIR=.next-dev npm run dev` — otherwise `next dev` rewrites the
+> `.next` directory the production server is reading from.
+
 Optional add-ons (all off by default):
 
 ```bash

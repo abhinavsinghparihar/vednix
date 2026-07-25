@@ -22,6 +22,7 @@ chroma/
 # --- Node / frontend ---
 node_modules/
 .next/
+.next-dev/
 out/
 dist/
 
