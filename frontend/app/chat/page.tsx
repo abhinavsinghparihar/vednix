@@ -1,7 +1,7 @@
 /**
- * Vednix AI workspace (/chat) — the single-chat shell. The landing identity
- * lives at /. Layers: neural background · mouse glow · sidebar | stage
- * (topbar, chat, composer) | studio panel.
+ * Vednix AI workspace (/chat) — the AI-OS shell. The Rail docks the
+ * surfaces; the stage switches between the Home hub, the chat experience,
+ * the Knowledge base and Memory. Landing identity lives at /.
  */
 
 "use client";
@@ -13,6 +13,10 @@ import { useChat } from "@/store/chat";
 import { EASE_CURVE } from "@/lib/utils";
 import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
+import { Rail } from "@/components/workspace/Rail";
+import { DashboardView } from "@/components/workspace/DashboardView";
+import { KnowledgeView } from "@/components/workspace/KnowledgeView";
+import { MemoryView } from "@/components/workspace/MemoryView";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ChatView } from "@/components/chat/ChatView";
 import { EmptyState } from "@/components/chat/EmptyState";
@@ -23,6 +27,7 @@ import { Topbar } from "@/components/Topbar";
 export default function WorkspacePage() {
   const bootstrap = useChat((s) => s.bootstrap);
   const messages = useChat((s) => s.messages);
+  const view = useChat((s) => s.view);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useState({ count: 0 })[0];
 
@@ -77,37 +82,65 @@ export default function WorkspacePage() {
         )}
       </AnimatePresence>
 
-      <Sidebar />
+      <Rail />
 
-      <section className="relative flex min-w-0 flex-1 flex-col">
-        {/* shell glides in as one cinematic stagger (the P2 motion language) */}
-        <motion.div
-          initial={{ opacity: 0, y: -16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7, delay: 0.05, ease: EASE_CURVE }}
-        >
-          <Topbar />
-        </motion.div>
+      <AnimatePresence mode="wait">
+        {view === "chat" ? (
+          <motion.section
+            key="chat"
+            className="relative flex min-w-0 flex-1"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.35, ease: EASE_CURVE }}
+          >
+            <Sidebar />
 
-        <motion.div
-          className="relative flex min-h-0 flex-1 flex-col"
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.12, ease: EASE_CURVE }}
-        >
-          {messages.length === 0 ? <EmptyState /> : <ChatView />}
-        </motion.div>
+            <div className="relative flex min-w-0 flex-1 flex-col">
+              {/* shell glides in as one cinematic stagger (the P2 motion language) */}
+              <motion.div
+                initial={{ opacity: 0, y: -16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.7, delay: 0.05, ease: EASE_CURVE }}
+              >
+                <Topbar />
+              </motion.div>
 
-        <motion.div
-          initial={{ opacity: 0, y: 18 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.75, delay: 0.2, ease: EASE_CURVE }}
-        >
-          <Composer />
-        </motion.div>
-      </section>
+              <motion.div
+                className="relative flex min-h-0 flex-1 flex-col"
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.12, ease: EASE_CURVE }}
+              >
+                {messages.length === 0 ? <EmptyState /> : <ChatView />}
+              </motion.div>
 
-      <ControlPanel />
+              <motion.div
+                initial={{ opacity: 0, y: 18 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.75, delay: 0.2, ease: EASE_CURVE }}
+              >
+                <Composer />
+              </motion.div>
+            </div>
+
+            <ControlPanel />
+          </motion.section>
+        ) : (
+          <motion.div
+            key={view}
+            className="flex min-w-0 flex-1"
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.35, ease: EASE_CURVE }}
+          >
+            {view === "dash" && <DashboardView />}
+            {view === "knowledge" && <KnowledgeView />}
+            {view === "memory" && <MemoryView />}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

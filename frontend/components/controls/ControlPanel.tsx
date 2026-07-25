@@ -4,18 +4,18 @@
  *   temperature      → WS payload (backend test-proven)
  *   language         → per-conversation, PATCHed server-side; drives the
  *                      multilingual system prompt (audit §8)
- *   memory viewer    → /api/memory CRUD
  *   internet + multi-agent → LangGraph research over SearXNG (Phase 5/6)
- * About block at the bottom carries product identity + creator signature.
+ * Memory & Knowledge graduated to full workspace views (see the Rail) —
+ * each feature has exactly one home. About block carries identity + the
+ * creator's signature.
  */
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { BrainCircuit, Globe, Volume2, Trash2, ChevronDown, Play, BookOpen, FileText, RefreshCw, Bot } from "lucide-react";
+import { Globe, Volume2, ChevronDown, Play, Bot } from "lucide-react";
 import { useChat } from "@/store/chat";
-import { api, type KnowledgeDoc, type MemoryItem } from "@/lib/api";
 import type { Language } from "@/lib/ws";
 import { tts } from "@/lib/tts";
 import { Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
@@ -34,116 +34,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-faint">{title}</p>
       {children}
     </section>
-  );
-}
-
-function MemorySection() {
-  const [items, setItems] = useState<MemoryItem[] | null>(null);
-
-  useEffect(() => {
-    api.listMemories().then(setItems).catch(() => setItems([]));
-  }, []);
-
-  return (
-    <Section title="Long-term memory">
-      <GlassPanel className="max-h-44 space-y-2 overflow-y-auto p-3 no-scrollbar">
-        {items === null ? (
-          <div className="skeleton h-9 w-full" />
-        ) : items.length === 0 ? (
-          <p className="py-1 text-xs leading-relaxed text-faint">
-            Nothing stored yet. In chat say{" "}
-            <code className="text-gold/80">remember that …</code> and Vednix keeps it across sessions.
-          </p>
-        ) : (
-          items.slice(0, 8).map((item) => (
-            <div key={item.id} className="group flex items-start gap-2 text-xs">
-              <BrainCircuit className="mt-0.5 h-3 w-3 shrink-0 text-gold/70" />
-              <span className="min-w-0 flex-1 leading-snug text-cream/80">
-                <span className="text-gold/60">#{item.id} {item.kind}</span> · {item.content}
-              </span>
-              <button
-                aria-label={`Forget memory ${item.id}`}
-                className="opacity-0 transition-opacity group-hover:opacity-100"
-                onClick={() => {
-                  void api.deleteMemory(item.id).then(() => setItems((cur) => cur?.filter((i) => i.id !== item.id) ?? []));
-                }}
-              >
-                <Trash2 className="h-3 w-3 text-muted hover:text-danger" />
-              </button>
-            </div>
-          ))
-        )}
-      </GlassPanel>
-    </Section>
-  );
-}
-
-function KnowledgeSection() {
-  const [docs, setDocs] = useState<KnowledgeDoc[] | null>(null);
-  const [busy, setBusy] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const refresh = () => api.listKnowledgeDocs().then(setDocs).catch(() => setDocs([]));
-  useEffect(() => {
-    refresh();
-  }, []);
-
-  const addFiles = async (files: FileList) => {
-    setBusy(true);
-    try {
-      const uploaded = await api.uploadFiles(Array.from(files));
-      for (const u of uploaded) {
-        await api.addKnowledgeDoc({ uploaded_file_id: u.id, title: u.name });
-      }
-      await refresh();
-    } catch { /* surfaced via console; panel stays usable */ } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Section title="Knowledge base">
-      <input
-        ref={fileRef}
-        type="file"
-        hidden
-        multiple
-        accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx"
-        onChange={(e) => {
-          if (e.target.files?.length) void addFiles(e.target.files);
-          e.target.value = "";
-        }}
-      />
-      <GlassPanel className="space-y-2 p-3">
-        <p className="text-[11px] leading-snug text-faint">
-          Documents here are searched automatically and cited into answers (FTS5, offline).
-        </p>
-        <Button variant="subtle" size="sm" className="w-full" disabled={busy} onClick={() => fileRef.current?.click()}>
-          {busy ? <RefreshCw className="h-3 w-3 animate-spin" /> : <BookOpen className="h-3 w-3" />}
-          Add document…
-        </Button>
-        {docs === null ? (
-          <div className="skeleton h-8 w-full" />
-        ) : docs.length === 0 ? (
-          <p className="text-[11px] text-faint">Empty — index a handbook, notes, or a spec.</p>
-        ) : (
-          docs.slice(0, 6).map((d) => (
-            <div key={d.id} className="group flex items-center gap-2 text-xs">
-              <FileText className="h-3 w-3 shrink-0 text-gold/70" />
-              <span className="min-w-0 flex-1 truncate text-cream/80">{d.title}</span>
-              <span className="shrink-0 text-faint">{d.chunk_count} chunks</span>
-              <button
-                aria-label={`Remove ${d.title}`}
-                className="opacity-0 transition-opacity group-hover:opacity-100"
-                onClick={() => void api.deleteKnowledgeDoc(d.id).then(refresh)}
-              >
-                <Trash2 className="h-3 w-3 text-muted hover:text-danger" />
-              </button>
-            </div>
-          ))
-        )}
-      </GlassPanel>
-    </Section>
   );
 }
 
@@ -274,9 +164,7 @@ export function ControlPanel() {
               </p>
             </Section>
 
-            <MemorySection />
 
-            <KnowledgeSection />
 
             <VoiceSection />
 

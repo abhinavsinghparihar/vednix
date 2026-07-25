@@ -83,6 +83,13 @@ export interface KnowledgeDoc {
   created_at: string;
 }
 
+export interface KnowledgeHit {
+  document: string;
+  chunk_id: number;
+  snippet: string; // FTS5 marks hit terms with «…»
+  score: number;
+}
+
 export const api = {
   health: () => request<{ status: string; provider?: string; ollama_available: boolean; default_model: string }>("/api/health"),
   models: () => request<{ default: string; available: string[] }>("/api/models"),
@@ -112,6 +119,8 @@ export const api = {
   },
 
   listKnowledgeDocs: () => request<KnowledgeDoc[]>("/api/knowledge/documents"),
+  searchKnowledge: (q: string) =>
+    request<{ query: string; hits: KnowledgeHit[] }>(`/api/knowledge/search?q=${encodeURIComponent(q)}`),
   addKnowledgeDoc: (body: { uploaded_file_id?: string; text?: string; title?: string }) =>
     request<KnowledgeDoc>("/api/knowledge/documents", { method: "POST", body: JSON.stringify(body) }),
   deleteKnowledgeDoc: (id: string) => request<void>(`/api/knowledge/documents/${id}`, { method: "DELETE" }),

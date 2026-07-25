@@ -37,6 +37,9 @@ export interface ChatMessage {
  * LISTENING and SPEAKING orb animations (dead since the desktop app) finally fire. */
 export type VoiceState = "idle" | "listening" | "speaking";
 
+/** The OS surfaces: home hub, the chat stage, knowledge base, memory. */
+export type WorkspaceView = "dash" | "chat" | "knowledge" | "memory";
+
 export const MAX_CHARS = 32_000;
 
 interface ChatStore {
@@ -76,6 +79,9 @@ interface ChatStore {
   panelOpen: boolean;
   loadingConversations: boolean;
   loadingMessages: boolean;
+  /** the OS view — Vednix is a workspace, not just a chatbox */
+  view: WorkspaceView;
+  setView: (v: WorkspaceView) => void;
 
   // attachments (Phase 4)
   draftAttachments: AttachmentChip[];
@@ -264,6 +270,8 @@ export const useChat = create<ChatStore>((set, get) => {
 
     sidebarOpen: true,
     panelOpen: true,
+    view: "dash",
+    setView: (v) => set({ view: v }),
     loadingConversations: true,
     loadingMessages: false,
 
@@ -324,10 +332,10 @@ export const useChat = create<ChatStore>((set, get) => {
     selectConversation: async (id) => {
       if (get().generating) get().stop();
       if (id === null) {
-        set({ activeId: null, messages: [] });
+        set({ activeId: null, messages: [], view: "chat" });
         return;
       }
-      set({ activeId: id, loadingMessages: true, messages: [] });
+      set({ activeId: id, loadingMessages: true, messages: [], view: "chat" });
       try {
         const detail = await api.getConversation(id);
         set({
@@ -349,7 +357,7 @@ export const useChat = create<ChatStore>((set, get) => {
 
     newChat: () => {
       if (get().generating) get().stop();
-      set({ activeId: null, messages: [] });
+      set({ activeId: null, messages: [], view: "chat" });
     },
 
     send: (raw) => {
