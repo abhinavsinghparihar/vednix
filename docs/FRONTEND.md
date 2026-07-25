@@ -13,7 +13,18 @@ app/page.tsx                      landing identity — "The Living Core" (server
  ├─ landing/Capabilities          6 honest shipped-feature cards (mono engine tags)
  ├─ landing/EnterSection          real 3-command setup card (copy button) · CTA
  └─ landing/LandingFooter         wordmark · promises · ©
-app/chat/page.tsx                 workspace shell
+app/layout.tsx                    theme bootstrap (blocking <head> script)
+ │                                · BootGate wrap (session intro, once/session)
+app/chat/page.tsx                 workspace OS — Rail + 4 views (AnimatePresence)
+ ├─ brand/BootGate                Orb ignition · wordmark · framed signature
+ │                                · hairline progress · curtain lift · skip
+ ├─ brand/ThemeToggle             sun⇄moon rotate-fade swap (rail + landing nav)
+ ├─ workspace/Rail                62px floating glass-liquid dock · view switch
+ │                                · theme toggle · vertical creator signature
+ ├─ workspace/DashboardView       bilingual greeting · ask capsule · 4 real
+ │                                stat cards · Continue list · live core card
+ ├─ workspace/KnowledgeView       KB docs add/search(FTS5 «» snippets)/delete
+ ├─ workspace/MemoryView          long-term memory add/list/delete
  ├─ background/NeuralBackground   particle synapse canvas (paused when tab hidden)
  ├─ background/MouseGlow          cursor-trailing gold halo (lerped, rAF)
  ├─ sidebar/Sidebar               brand · search · pin/rename/delete · health footer
@@ -25,7 +36,7 @@ app/chat/page.tsx                 workspace shell
  │                                · Mermaid (lazy import — 500KB opt-in only)
  ├─ composer/Composer             autogrow glass input · Enter/Shift+Enter
  │                                · send⇄stop morph · 32k char counter
- └─ controls/ControlPanel         model · temperature · language · memory · phases
+ └─ controls/ControlPanel         model · temperature · language · voice · agents
 ```
 
 ## Routes
@@ -36,7 +47,35 @@ the same asset the workspace renders from WebSocket `state_changed` frames.
 The "ask" capsule bridges a question into `/chat` via a one-shot
 sessionStorage hand-off (consumed by Composer on mount).
 
-`/chat` — the workspace shell (sidebar · chat stage · composer · studio panel).
+`/chat` — the workspace OS. A floating glass **Rail** (left edge) switches
+four views with `AnimatePresence mode="wait"` transitions:
+**dash** (default — greeting, real stats, ask capsule, continue, live core),
+**chat** (sidebar · stage · composer · studio panel), **knowledge** (KB with
+FTS5 search), **memory** (long-term store). The dashboard ask capsule reuses
+the same sessionStorage hand-off as the landing one.
+
+### Dual theme — Obsidian (dark, default) & Ivory (light)
+
+Tailwind v4 resolves `@theme` token **variables** at runtime, so
+`html[data-theme="light"]` simply redefines the palette
+(`--color-void: #f4f0e6` paper · `panel: #ffffff` · bronze `gold: #a97e2c` ·
+ink `cream: #221b0e` · `muted: #6e6350` · `faint: #9a8d74`) and every glass /
+gradient / skeleton utility re-skins with **zero component changes**. Light
+overrides live in one block in `globals.css`; code blocks keep a dark
+background in both modes (intentional contrast anchor). `lib/theme.ts` +
+a blocking inline `<head>` script stamp `data-theme` before first paint
+(localStorage `vednix.theme` → `prefers-color-scheme` → dark), so there is
+no theme flash. `brand/ThemeToggle.tsx` switches with a sun⇄moon rotate-fade
+and sits in the Rail and the landing nav (desktop + mobile).
+
+### Session boot — "the site opens cool"
+
+`brand/BootGate.tsx` wraps the app in `layout.tsx` and plays **once per
+session** (`sessionStorage vednix.booted`): the Orb ignites in LISTENING, the
+wordmark springs in, the framed creator signature fades, a gold hairline
+progress bar sweeps, then the whole curtain slides up (`.75s` EASE_CURVE).
+Click anywhere to skip; `prefers-reduced-motion` bypasses it entirely. Probes
+and e2e can pre-set the flag via `add_init_script` to skip the intro.
 
 ### Creator signature (premium branding)
 
@@ -45,10 +84,11 @@ sessionStorage hand-off (consumed by Composer on mount).
 `components/brand/Signature.tsx` renders it in exactly one style — mono
 micro-caps, faint ink, optional gold-hairline `framed` variant — so the
 signature never drifts. Placements: global loading splash
-(`app/loading.tsx`), landing hero edge anchor, landing footer, landing
-mobile menu, workspace sidebar footer, EmptyState close, and the Studio
-panel's About block. The backend mirrors it via `GET /api/health` (`creator`,
-from `VEDNIX_CREATOR_NAME`). Never larger, never louder.
+(`app/loading.tsx`), session boot curtain, landing hero edge anchor, landing
+footer, landing mobile menu, **Rail** (vertical `writing-mode: vertical-rl`),
+workspace sidebar footer, EmptyState close, dashboard core card, and the
+Studio panel's About block. The backend mirrors it via `GET /api/health`
+(`creator`, from `VEDNIX_CREATOR_NAME`). Never larger, never louder.
 
 ### Font pipeline (root-caused, do not regress)
 
@@ -59,16 +99,23 @@ defining element and silently degrades the entire chain to UA serif.
 
 ## Design tokens (app/globals.css)
 
-`--color-void/#050505 · charcoal · panel · gold #e3b857 · gold-bright #f4d68a ·
-ember #e8843c · cream #f5f0e6` + `.glass`, `.glass-strong`, `.gold-border`,
-`.text-gold-gradient`, `.skeleton` utilities; `hljs` gold-on-charcoal theme.
+Dark (Obsidian, default): `--color-void/#050505 · charcoal · panel ·
+gold #e3b857 · gold-bright #f4d68a · ember #e8843c · cream #f5f0e6`.
+Light (Ivory): see *Dual theme* above — one block redefines the same tokens
+under `html[data-theme="light"]`. Shared utilities: `.glass`, `.glass-strong`,
+`.glass-liquid` (white-gradient liquid glass, themed per mode), `.gold-border`,
+`.text-gold-gradient`, `.skeleton`; `hljs` gold-on-charcoal theme.
 
 ## State (store/chat.ts — Zustand)
 
 REST bootstraps (conversations/models/health); one `WSClient` per app with
 typed frames (`state_changed / message_started / token / message_done /
 conversation_created / title_updated / error`), auto-reconnect with backoff.
-Every right-panel control is real: model → WS payload, temperature → WS payload
+View routing is a store concern: `view: WorkspaceView`
+(`"dash" | "chat" | "knowledge" | "memory"`, default `"dash"`) via
+`setView()`; `newChat()` / `selectConversation()` force `view: "chat"` so
+clicking a conversation always lands on the stage. Every right-panel control
+is real: model → WS payload, temperature → WS payload
 (backend-regression-tested), language → PATCH + system-prompt directive.
 
 ## Voice (Phase 3)
@@ -108,9 +155,14 @@ Every right-panel control is real: model → WS payload, temperature → WS payl
 - **Vision honesty:** images attach fine; the backend auto-routes to an
   installed vision model with a `🖼 Routed images to …` notice, or replies with
   an exact `ollama pull …` fix when none is local.
-- **Studio → Knowledge Base:** add document (file picker reuses the upload
-  pipeline: pdf/docx/xlsx/csv/pptx/txt/md), list with chunk counts, remove.
-  Hits injected into answers surface as `kb_sources` chips on the reply.
+- **Knowledge Base is a first-class view** (Rail → knowledge, promoted out of
+  the Studio panel): add document (file picker reuses the upload pipeline:
+  pdf/docx/xlsx/csv/pptx/txt/md), list with chunk counts, remove, and
+  **FTS5 search** (`GET /api/knowledge/search`) rendering `«»`-marked
+  snippets. Hits injected into answers surface as `kb_sources` chips on the
+  reply.
+- **Memory is a first-class view** (Rail → memory): add/list/delete
+  long-term memories; the dashboard stat card shows the live count.
 - **Studio → Voice (Phase 3):** speak-replies toggle + speed slider + test.
 
 ## Phase 6 — multi-agent mode (shipped)
