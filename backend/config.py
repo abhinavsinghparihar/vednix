@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     # --- Server ---
     host: str = "127.0.0.1"
     port: int = 8000
+    # auto-reload watches the source tree — great for hacking, wasteful (and
+    # process-forking) in normal runs. Off by default; VEDNIX_DEV_RELOAD=1.
+    dev_reload: bool = False
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"  # both loopback forms
 
     # --- Database ---

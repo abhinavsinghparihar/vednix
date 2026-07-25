@@ -7,8 +7,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Paperclip, Mic, ArrowUp, Square, MicOff, FileText, Image as ImageIcon, Table2, Presentation, FileCode, Loader2, X } from "lucide-react";
-import { MAX_CHARS, useChat, useDisplayCoreState, type AttachmentChip } from "@/store/chat";
+import { Paperclip, Mic, ArrowUp, Square, MicOff, Loader2 } from "lucide-react";
+import { MAX_CHARS, useChat, useDisplayCoreState } from "@/store/chat";
+import { AttachmentChipView } from "@/components/chat/attachments";
 import { cn } from "@/lib/utils";
 import { Badge, Button } from "@/components/ui/primitives";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -19,42 +20,6 @@ function micLocale(language: string | undefined): string {
   if (language === "hi" || language === "hinglish") return "hi-IN";
   if (language === "en") return "en-US";
   return "hi-IN"; // auto: hi-IN recognizer handles Hindi + Hinglish + English
-}
-
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-export function kindIcon(kind: string) {
-  switch (kind) {
-    case "image": return ImageIcon;
-    case "sheet": return Table2;
-    case "slides": return Presentation;
-    case "text": return FileCode;
-    default: return FileText;
-  }
-}
-
-export function AttachmentChipView({ att, onRemove }: { att: AttachmentChip; onRemove?: () => void }) {
-  const Icon = kindIcon(att.kind);
-  return (
-    <span className="glass group/chip flex items-center gap-2 rounded-xl px-2.5 py-1.5 text-xs text-cream/85">
-      <Icon className="h-3.5 w-3.5 text-gold/80" />
-      <span className="max-w-[160px] truncate">{att.name}</span>
-      <span className="text-faint">{formatBytes(att.size)}</span>
-      {onRemove && (
-        <button
-          aria-label={`Remove ${att.name}`}
-          onClick={onRemove}
-          className="rounded-full p-0.5 text-faint transition-colors hover:bg-white/10 hover:text-danger"
-        >
-          <X className="h-3 w-3" />
-        </button>
-      )}
-    </span>
-  );
 }
 
 export function Composer() {

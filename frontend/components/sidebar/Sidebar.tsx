@@ -9,7 +9,7 @@ import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquarePlus, Pin, PinOff, Search, Trash2, Pencil, Check, X, Folder } from "lucide-react";
 import { useChat } from "@/store/chat";
-import { api, type ConversationSummary } from "@/lib/api";
+import { type ConversationSummary } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button, Input } from "@/components/ui/primitives";
 import { Orb } from "@/components/orb/Orb";

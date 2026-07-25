@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { Orb } from "@/components/orb/Orb";
 import { Badge } from "@/components/ui/primitives";
-import { AttachmentChipView } from "@/components/composer/Composer";
+import { AttachmentChipView } from "@/components/chat/attachments";
 import { BookOpen, Globe, Bot, Loader2 } from "lucide-react";
 
 function CopyButton({ text }: { text: string }) {

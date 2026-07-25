@@ -18,8 +18,7 @@ import { useChat } from "@/store/chat";
 import { api, type KnowledgeDoc, type MemoryItem } from "@/lib/api";
 import type { Language } from "@/lib/ws";
 import { tts } from "@/lib/tts";
-import { cn } from "@/lib/utils";
-import { Badge, Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
+import { Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
 import { Signature } from "@/components/brand/Signature";
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
@@ -145,20 +144,6 @@ function KnowledgeSection() {
         )}
       </GlassPanel>
     </Section>
-  );
-}
-
-function RoadmapSwitch({ icon: Icon, label, phase }: { icon: typeof Globe; label: string; phase: string }) {
-  return (
-    <div className="flex items-center justify-between rounded-xl px-1 py-1.5">
-      <span className="flex items-center gap-2.5 text-sm text-muted">
-        <Icon className="h-4 w-4" /> {label}
-      </span>
-      <span className="flex items-center gap-2">
-        <Badge>{phase}</Badge>
-        <Switch checked={false} disabled label={label} />
-      </span>
-    </div>
   );
 }
 

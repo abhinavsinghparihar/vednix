@@ -15,6 +15,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from agents import build_plugins
@@ -114,6 +115,9 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
     app = FastAPI(title="Vednix AI", version="0.1.0", lifespan=lifespan)
     if settings.auth_token:
         app.add_middleware(BearerAuthMiddleware, token=settings.auth_token)
+    # compress REST payloads (conversation lists, KB snippets) — WS frames are
+    # per-message already and bypass HTTP middleware entirely
+    app.add_middleware(GZipMiddleware, minimum_size=512)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
@@ -145,4 +149,6 @@ if __name__ == "__main__":
     import uvicorn
 
     s = get_settings()
-    uvicorn.run("main:app", host=s.host, port=s.port, reload=True)
+    # Production-grade default: single process, no file watcher. During
+    # development opt into reload explicitly (VEDNIX_DEV_RELOAD=1).
+    uvicorn.run("main:app", host=s.host, port=s.port, reload=s.dev_reload)

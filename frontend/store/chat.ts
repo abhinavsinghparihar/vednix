@@ -118,7 +118,7 @@ export const useChat = create<ChatStore>((set, get) => {
     });
   }
   function handleFrame(frame: ServerFrame): void {
-    const { messages, activeId, conversations } = get();
+    const { messages, conversations } = get();
     switch (frame.type) {
       case "state_changed":
         set({ coreState: frame.state });
