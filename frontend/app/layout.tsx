@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono, Noto_Sans_Devanagari, Outfit } from "next/font/google";
+import { BootGate } from "@/components/brand/BootGate";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
@@ -26,10 +27,20 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
+      <head>
+        {/* theme bootstrap — before first paint, zero flash (FOUC-safe).
+            Defaults to Obsidian; honors localStorage, then OS preference. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{var t=localStorage.getItem("vednix.theme");if(t==="light"||t==="dark"){document.documentElement.dataset.theme=t}else if(window.matchMedia("(prefers-color-scheme: light)").matches){document.documentElement.dataset.theme="light"}}catch(e){}`,
+          }}
+        />
+      </head>
       <body
         className={`${inter.variable} ${outfit.variable} ${jbMono.variable} ${notoDev.variable} antialiased`}
       >
+        <BootGate />
         {children}
       </body>
     </html>

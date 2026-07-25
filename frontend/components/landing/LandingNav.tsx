@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpRight, Menu, X } from "lucide-react";
 import { EASE } from "./shared";
 import { Signature } from "@/components/brand/Signature";
+import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { Wordmark } from "@/components/brand/Wordmark";
 
 const LINKS = [
@@ -59,6 +60,7 @@ export function LandingNav() {
           </div>
 
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Link
               href="/chat"
               className="group hidden h-10 items-center gap-2 rounded-xl bg-gold px-5 text-[11px] font-bold uppercase tracking-[0.14em] text-void transition-all duration-300 hover:bg-gold-bright hover:shadow-glow-gold sm:flex"
@@ -128,8 +130,9 @@ export function LandingNav() {
                 </Link>
               </motion.div>
             </div>
-            <div className="px-8 pb-9">
+            <div className="flex items-center justify-between px-8 pb-9">
               <Signature framed />
+              <ThemeToggle />
             </div>
           </motion.div>
         )}
