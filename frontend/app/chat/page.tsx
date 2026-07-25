@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { UploadCloud } from "lucide-react";
 import { useChat } from "@/store/chat";
+import { EASE_CURVE } from "@/lib/utils";
 import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
 import { Sidebar } from "@/components/sidebar/Sidebar";
@@ -79,9 +80,31 @@ export default function WorkspacePage() {
       <Sidebar />
 
       <section className="relative flex min-w-0 flex-1 flex-col">
-        <Topbar />
-        {messages.length === 0 ? <EmptyState /> : <ChatView />}
-        <Composer />
+        {/* shell glides in as one cinematic stagger (the P2 motion language) */}
+        <motion.div
+          initial={{ opacity: 0, y: -16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.05, ease: EASE_CURVE }}
+        >
+          <Topbar />
+        </motion.div>
+
+        <motion.div
+          className="relative flex min-h-0 flex-1 flex-col"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.12, ease: EASE_CURVE }}
+        >
+          {messages.length === 0 ? <EmptyState /> : <ChatView />}
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 18 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.75, delay: 0.2, ease: EASE_CURVE }}
+        >
+          <Composer />
+        </motion.div>
       </section>
 
       <ControlPanel />

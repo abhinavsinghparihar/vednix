@@ -12,7 +12,7 @@ import { useChat } from "@/store/chat";
 import { type ConversationSummary } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button, Input } from "@/components/ui/primitives";
-import { Orb } from "@/components/orb/Orb";
+import { Wordmark } from "@/components/brand/Wordmark";
 import { Signature } from "@/components/brand/Signature";
 
 function ConversationRow({ conv, active }: { conv: ConversationSummary; active: boolean }) {
@@ -115,16 +115,12 @@ export function Sidebar() {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: -320, opacity: 0 }}
           transition={{ type: "spring", stiffness: 320, damping: 32 }}
-          className="glass-strong z-30 flex h-full w-[290px] shrink-0 flex-col rounded-r-3xl border-l-0 px-4 py-4
-                     max-md:fixed max-md:left-0 max-md:top-0 max-md:rounded-none max-md:shadow-[0_0_80px_rgba(0,0,0,0.8)]"
+          className="glass-liquid z-30 m-3 mr-0 flex w-[290px] shrink-0 flex-col rounded-3xl px-4 py-4
+                     max-md:fixed max-md:left-0 max-md:top-0 max-md:m-0 max-md:h-full max-md:rounded-r-3xl max-md:shadow-[0_0_80px_rgba(0,0,0,0.8)]"
         >
-          {/* brand */}
-          <div className="flex items-center gap-3 px-1 pb-4">
-            <Orb state="IDLE" size={44} />
-            <div>
-              <p className="text-gold-gradient text-lg font-bold tracking-tight">Vednix AI</p>
-              <p className="text-[10px] uppercase tracking-[0.22em] text-faint">next-gen workspace</p>
-            </div>
+          {/* brand — the official wordmark, same as landing */}
+          <div className="flex items-center px-1 pb-4">
+            <Wordmark />
           </div>
 
           <Button variant="primary" onClick={newChat} className="mb-3 w-full">

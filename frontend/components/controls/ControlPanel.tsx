@@ -226,8 +226,8 @@ export function ControlPanel() {
           animate={{ x: 0, opacity: 1 }}
           exit={{ x: 320, opacity: 0 }}
           transition={{ type: "spring", stiffness: 320, damping: 32 }}
-          className="glass-strong z-20 h-full w-[292px] shrink-0 rounded-l-3xl border-r-0 px-5 py-5
-                     max-lg:fixed max-lg:right-0 max-lg:top-0 max-lg:rounded-none"
+          className="glass-liquid z-20 m-3 ml-0 w-[292px] shrink-0 rounded-3xl px-5 py-5
+                     max-lg:fixed max-lg:right-0 max-lg:top-0 max-lg:m-0 max-lg:h-full max-lg:rounded-l-3xl"
         >
           <div className="no-scrollbar flex h-full flex-col gap-6 overflow-y-auto">
             <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-faint">Studio</p>

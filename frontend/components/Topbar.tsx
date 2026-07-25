@@ -36,7 +36,8 @@ export function Topbar() {
   };
 
   return (
-    <header className="flex items-center gap-2 px-3 py-2.5 md:px-4">
+    <header className="glass-liquid mx-3 mt-3 flex items-center gap-2 rounded-2xl px-2.5 py-2 md:mx-4">
+
       <Button size="icon" variant="ghost" aria-label="Toggle sidebar" onClick={toggleSidebar}>
         <PanelLeft className="h-4 w-4" />
       </Button>
@@ -67,7 +68,7 @@ export function Topbar() {
             }}
             title={conv ? "Rename" : undefined}
           >
-            <span className="truncate text-sm font-medium text-cream/90">
+            <span className="truncate font-display text-sm font-semibold tracking-wide text-cream/90">
               {conv ? conv.title : "New conversation"}
             </span>
             {conv && <Pencil className="h-3 w-3 shrink-0 text-faint opacity-0 transition-opacity group-hover:opacity-100" />}

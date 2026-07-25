@@ -114,7 +114,7 @@ export function Composer() {
         )}
         <div
           className={cn(
-            "glass-strong flex items-end gap-2 rounded-3xl p-3 transition-shadow duration-300",
+            "glass-liquid flex items-end gap-2 rounded-[26px] p-3 transition-shadow duration-300",
             "focus-within:border-[rgba(227,184,87,0.45)] focus-within:shadow-glow-gold",
             generating && "border-[rgba(227,184,87,0.3)]",
           )}

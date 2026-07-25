@@ -61,7 +61,7 @@ export function EmptyState() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.35 + i * 0.07, duration: 0.4 }}
             onClick={() => send(s.label)}
-            className="glass group flex items-center gap-3 rounded-2xl px-4 py-3.5 text-left transition-all duration-200 hover:border-[rgba(227,184,87,0.4)] hover:bg-[rgba(227,184,87,0.06)] hover:shadow-glow-gold"
+            className="glass group flex items-center gap-3 rounded-2xl px-4 py-3.5 text-left transition-all duration-300 hover:-translate-y-0.5 hover:border-[rgba(227,184,87,0.4)] hover:bg-[rgba(227,184,87,0.06)] hover:shadow-glow-gold"
           >
             <s.icon className="h-4.5 w-4.5 shrink-0 text-gold/80 transition-transform group-hover:scale-110 h-[18px] w-[18px]" />
             <span className="min-w-0">

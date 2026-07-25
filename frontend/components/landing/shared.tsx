@@ -8,9 +8,9 @@
 
 import { motion, useReducedMotion } from "framer-motion";
 import type { ReactNode } from "react";
-import { cn } from "@/lib/utils";
+import { cn, EASE_CURVE } from "@/lib/utils";
 
-export const EASE = [0.16, 1, 0.3, 1] as const;
+export const EASE = EASE_CURVE;
 
 /** Entrance: fade + rise, staggered via `delay`. Respects reduced motion. */
 export function Reveal({
