@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
 import { MicroLabel, Reveal } from "./shared";
 import { OrbStage } from "./OrbStage";
+import { Signature } from "@/components/brand/Signature";
 import { MAX_CHARS } from "@/store/chat";
 
 const STATS = [
@@ -199,6 +200,12 @@ export function Hero() {
         <span className="font-mono text-[9px] tracking-[0.42em] text-faint">SCROLL</span>
         <span className="h-8 w-px animate-scroll-cue bg-gradient-to-b from-gold/80 to-transparent" />
       </div>
+
+      {/* architectural edge anchors */}
+      <p className="pointer-events-none absolute bottom-7 left-6 hidden font-mono text-[9px] tracking-[0.3em] text-faint lg:block xl:left-14">
+        VEDNIX AI · 2026
+      </p>
+      <Signature className="pointer-events-none absolute bottom-7 right-6 hidden lg:inline-flex xl:right-14" />
     </section>
   );
 }

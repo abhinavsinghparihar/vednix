@@ -69,6 +69,7 @@ class HealthOut(BaseModel):
     ollama_available: bool
     default_model: str
     assistant: str
+    creator: str = "Abhinav Singh"
 
 
 # --- REST: uploads & knowledge (Phase 4) -----------------------------------------

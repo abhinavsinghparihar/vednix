@@ -38,6 +38,18 @@ sessionStorage hand-off (consumed by Composer on mount).
 
 `/chat` — the workspace shell (sidebar · chat stage · composer · studio panel).
 
+### Creator signature (premium branding)
+
+`lib/brand.ts` is the single source of truth: `BRAND_NAME` (always primary)
++ `CREATOR_NAME` → `CREATOR_SIGNATURE` ("Made by Abhinav Singh").
+`components/brand/Signature.tsx` renders it in exactly one style — mono
+micro-caps, faint ink, optional gold-hairline `framed` variant — so the
+signature never drifts. Placements: global loading splash
+(`app/loading.tsx`), landing hero edge anchor, landing footer, landing
+mobile menu, workspace sidebar footer, EmptyState close, and the Studio
+panel's About block. The backend mirrors it via `GET /api/health` (`creator`,
+from `VEDNIX_CREATOR_NAME`). Never larger, never louder.
+
 ### Font pipeline (root-caused, do not regress)
 
 `@theme` tokens name concrete families (`--font-display: "Outfit"…`). Do NOT

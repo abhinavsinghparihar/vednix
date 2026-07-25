@@ -5,7 +5,8 @@
  *   language         → per-conversation, PATCHed server-side; drives the
  *                      multilingual system prompt (audit §8)
  *   memory viewer    → /api/memory CRUD
- * Internet / Vision / Sound toggles are disabled Phase badges — honest roadmap.
+ *   internet + multi-agent → LangGraph research over SearXNG (Phase 5/6)
+ * About block at the bottom carries product identity + creator signature.
  */
 
 "use client";
@@ -19,6 +20,7 @@ import type { Language } from "@/lib/ws";
 import { tts } from "@/lib/tts";
 import { cn } from "@/lib/utils";
 import { Badge, Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
+import { Signature } from "@/components/brand/Signature";
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -316,9 +318,16 @@ export function ControlPanel() {
               </p>
             </Section>
 
-            <p className="mt-auto text-center text-[10px] text-faint">
-              Vednix AI · v0.1 · fully local
-            </p>
+            {/* About block — product identity + creator signature */}
+            <div className="glass mt-auto flex flex-col items-center gap-1.5 rounded-2xl px-4 py-4 text-center">
+              <span className="font-display text-[11px] font-bold tracking-[0.3em] text-cream">
+                VEDNIX AI
+              </span>
+              <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-faint">
+                next-gen workspace · v0.1 · fully local
+              </span>
+              <Signature framed className="mt-1" />
+            </div>
           </div>
         </motion.aside>
       )}

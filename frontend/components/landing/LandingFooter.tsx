@@ -1,9 +1,11 @@
 /**
- * Minimal footer — wordmark, the three promises, copyright. Nothing else.
+ * Minimal footer — wordmark, the creator's signature framed in gold
+ * hairlines, and the promises. Nothing else.
  */
 
 import Link from "next/link";
-import { Wordmark } from "./LandingNav";
+import { Signature } from "@/components/brand/Signature";
+import { Wordmark } from "@/components/brand/Wordmark";
 
 export function LandingFooter() {
   return (
@@ -12,10 +14,10 @@ export function LandingFooter() {
         <Link href="#top" aria-label="Vednix AI — back to top">
           <Wordmark />
         </Link>
-        <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-faint">
-          Offline-first · No telemetry · हिंदी-ready
+        <Signature framed />
+        <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-faint">
+          Offline-first · No telemetry · © 2026
         </p>
-        <p className="font-mono text-[10px] tracking-[0.2em] text-faint">© 2026 VEDNIX AI</p>
       </div>
     </footer>
   );

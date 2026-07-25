@@ -75,6 +75,7 @@ class Settings(BaseSettings):
 
     # --- Persona ---
     assistant_name: str = "Vednix AI"
+    creator_name: str = "Abhinav Singh"  # creator signature, surfaced via /api/health
 
     @model_validator(mode="after")
     def _absolutize_local_paths(self) -> "Settings":

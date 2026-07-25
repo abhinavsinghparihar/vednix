@@ -39,6 +39,9 @@ def test_health_and_models(factory):
     with factory() as client:
         health = client.get("/api/health").json()
         assert health["status"] == "ok" and health["ollama_available"] is True
+        # brand signature: primary brand + creator, both configurable
+        assert health["assistant"] == "Vednix AI"
+        assert health["creator"] == "Abhinav Singh"
         models = client.get("/api/models").json()
         assert "fake-model" in models["available"]
 

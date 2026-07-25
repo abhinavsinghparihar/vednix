@@ -11,18 +11,8 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpRight, Menu, X } from "lucide-react";
 import { EASE } from "./shared";
-import { cn } from "@/lib/utils";
-
-export function Wordmark({ className }: { className?: string }) {
-  return (
-    <span className={cn("flex items-center gap-2.5", className)}>
-      <span className="flex h-8 w-8 items-center justify-center rounded-[10px] border border-gold/40 bg-gradient-to-br from-gold/20 to-ember/10 font-display text-base font-extrabold text-gold-bright shadow-glow-gold">
-        V
-      </span>
-      <span className="font-display text-sm font-bold tracking-[0.32em] text-cream">VEDNIX</span>
-    </span>
-  );
-}
+import { Signature } from "@/components/brand/Signature";
+import { Wordmark } from "@/components/brand/Wordmark";
 
 const LINKS = [
   { label: "Workspace", href: "/chat" },
@@ -137,6 +127,9 @@ export function LandingNav() {
                   Launch App <ArrowUpRight className="h-3.5 w-3.5" />
                 </Link>
               </motion.div>
+            </div>
+            <div className="px-8 pb-9">
+              <Signature framed />
             </div>
           </motion.div>
         )}

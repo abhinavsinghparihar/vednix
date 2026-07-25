@@ -20,6 +20,7 @@ async def health(request: Request, core: EngineCore = Depends(get_core)) -> Heal
         ollama_available=await core.llm.is_available(),
         default_model=core.llm.model,
         assistant=core.settings.assistant_name,
+        creator=core.settings.creator_name,
     )
 
 

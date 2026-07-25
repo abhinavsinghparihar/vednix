@@ -6,7 +6,7 @@ Base URL: `http://localhost:8000` · Interactive docs: `/docs` (OpenAPI)
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/health` | `{status, ollama_available, default_model, assistant}` |
+| GET | `/api/health` | `{status, ollama_available, default_model, assistant, creator}` |
 | GET | `/api/models` | `{default, available[]}` — powers the model selector |
 | GET | `/api/conversations` | List (pinned first, then recent) |
 | POST | `/api/conversations` | Create `{title?, language: auto\|hi\|hinglish\|en}` → 201 |

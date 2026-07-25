@@ -13,6 +13,7 @@ import { api, type ConversationSummary } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button, Input } from "@/components/ui/primitives";
 import { Orb } from "@/components/orb/Orb";
+import { Signature } from "@/components/brand/Signature";
 
 function ConversationRow({ conv, active }: { conv: ConversationSummary; active: boolean }) {
   const { selectConversation, removeConversation, togglePin, renameConversation } = useChat();
@@ -170,7 +171,7 @@ export function Sidebar() {
             )}
           </div>
 
-          {/* footer: health */}
+          {/* footer: health + creator signature */}
           <div className="mt-3 flex items-center justify-between rounded-xl bg-black/30 px-3 py-2 text-[11px] text-muted">
             <span className="flex items-center gap-1.5">
               <span
@@ -184,6 +185,9 @@ export function Sidebar() {
             <span className={cn(ollamaAvailable ? "text-gold/80" : "text-red-300/80")}>
               {providerLabel} {ollamaAvailable ? "✓" : "✕"}
             </span>
+          </div>
+          <div className="mt-2.5 flex justify-center pb-0.5">
+            <Signature />
           </div>
         </motion.aside>
       )}
