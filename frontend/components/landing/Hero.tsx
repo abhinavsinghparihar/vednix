@@ -15,7 +15,7 @@ import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
 import { MicroLabel, Reveal } from "./shared";
 import { OrbStage } from "./OrbStage";
 import { Signature } from "@/components/brand/Signature";
-import { MAX_CHARS } from "@/store/chat";
+import { MAX_CHARS, useChat } from "@/store/chat";
 
 const STATS = [
   { value: "109", label: "automated tests, green" },
@@ -42,6 +42,10 @@ function AskCapsule() {
       } catch {
         /* private mode — the workspace simply opens empty */
       }
+      // The capsule's intent is "open the stage with this question" — the
+      // store survives client-side routing, so aim the shell at chat now
+      // (hard arrivals are covered by the /chat mount guard).
+      useChat.getState().setView("chat");
     }
     router.push("/chat");
   };

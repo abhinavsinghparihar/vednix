@@ -52,7 +52,12 @@ four views with `AnimatePresence mode="wait"` transitions:
 **dash** (default — greeting, real stats, ask capsule, continue, live core),
 **chat** (sidebar · stage · composer · studio panel), **knowledge** (KB with
 FTS5 search), **memory** (long-term store). The dashboard ask capsule reuses
-the same sessionStorage hand-off as the landing one.
+the same sessionStorage hand-off as the landing one. A pending hand-off is
+treated as explicit intent to compose: the landing capsule calls
+`setView("chat")` before routing (client-side nav keeps the store), and the
+`/chat` mount guard forces `view: "chat"` whenever `vednix.ask` is still
+unconsumed (hard refresh / direct arrival), so the question always lands in
+the Composer.
 
 ### Dual theme — Obsidian (dark, default) & Ivory (light)
 

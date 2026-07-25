@@ -28,12 +28,21 @@ export default function WorkspacePage() {
   const bootstrap = useChat((s) => s.bootstrap);
   const messages = useChat((s) => s.messages);
   const view = useChat((s) => s.view);
+  const setView = useChat((s) => s.setView);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useState({ count: 0 })[0];
 
   useEffect(() => {
     void bootstrap();
-  }, [bootstrap]);
+    // A pending ask-capsule hand-off (landing dashboard capsule) is explicit
+    // intent to compose — honor it on hard arrivals too, where the store
+    // booted fresh to the default "dash" view. Composer consumes the text.
+    try {
+      if (sessionStorage.getItem("vednix.ask")) setView("chat");
+    } catch {
+      /* storage unavailable — the workspace opens on the dashboard */
+    }
+  }, [bootstrap, setView]);
 
   const onDragEnter = useCallback((e: React.DragEvent) => {
     if (!e.dataTransfer.types.includes("Files")) return;
