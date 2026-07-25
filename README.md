@@ -39,6 +39,9 @@ cp .env.local.example .env.local                       # optional; defaults just
 npm run dev                                            # → http://localhost:3000 ✨
 ```
 
+Open **http://localhost:3000** — the landing ("The Living Core") greets you;
+**Launch App** (or the ask-capsule) enters the workspace at `/chat`.
+
 Optional add-ons (all off by default):
 
 ```bash

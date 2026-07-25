@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono, Noto_Sans_Devanagari } from "next/font/google";
+import { Inter, JetBrains_Mono, Noto_Sans_Devanagari, Outfit } from "next/font/google";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit", display: "swap" });
 const jbMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jbmono", display: "swap" });
 const notoDev = Noto_Sans_Devanagari({
   subsets: ["devanagari"],
@@ -26,7 +27,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} ${jbMono.variable} ${notoDev.variable} antialiased`}>
+      <body
+        className={`${inter.variable} ${outfit.variable} ${jbMono.variable} ${notoDev.variable} antialiased`}
+      >
         {children}
       </body>
     </html>

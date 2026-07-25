@@ -80,6 +80,21 @@ export function Composer() {
     return () => window.removeEventListener("vednix:edit", onEdit);
   }, []);
 
+  // Landing "ask" capsule hands its question over once (sessionStorage
+  // bridge — the landing and workspace are separate routes)
+  useEffect(() => {
+    try {
+      const q = sessionStorage.getItem("vednix.ask");
+      if (q) {
+        sessionStorage.removeItem("vednix.ask");
+        setValue(q);
+        areaRef.current?.focus();
+      }
+    } catch {
+      /* storage unavailable — open empty */
+    }
+  }, []);
+
   const autosize = useCallback(() => {
     const el = areaRef.current;
     if (!el) return;

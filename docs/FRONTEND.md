@@ -6,7 +6,14 @@ Next.js 15 (App Router) · TypeScript strict · Tailwind CSS v4 · Zustand · Fr
 ## Composition
 
 ```
-app/page.tsx                      workspace shell
+app/page.tsx                      landing identity — "The Living Core" (server comp)
+ ├─ landing/LandingNav            floating glass pill nav · staggered mobile overlay
+ ├─ landing/Hero                  manifesto · ask-capsule (→ /chat prefilled) · stats
+ ├─ landing/OrbStage              live 8-state Orb cycle · orbit rings · glass badges
+ ├─ landing/Capabilities          6 honest shipped-feature cards (mono engine tags)
+ ├─ landing/EnterSection          real 3-command setup card (copy button) · CTA
+ └─ landing/LandingFooter         wordmark · promises · ©
+app/chat/page.tsx                 workspace shell
  ├─ background/NeuralBackground   particle synapse canvas (paused when tab hidden)
  ├─ background/MouseGlow          cursor-trailing gold halo (lerped, rAF)
  ├─ sidebar/Sidebar               brand · search · pin/rename/delete · health footer
@@ -20,6 +27,23 @@ app/page.tsx                      workspace shell
  │                                · send⇄stop morph · 32k char counter
  └─ controls/ControlPanel         model · temperature · language · memory · phases
 ```
+
+## Routes
+
+`/` — the landing identity. Its centerpiece is the actual 8-state Vednix Orb
+performing live (cycling CoreStates every ~1.9s) instead of a stock video —
+the same asset the workspace renders from WebSocket `state_changed` frames.
+The "ask" capsule bridges a question into `/chat` via a one-shot
+sessionStorage hand-off (consumed by Composer on mount).
+
+`/chat` — the workspace shell (sidebar · chat stage · composer · studio panel).
+
+### Font pipeline (root-caused, do not regress)
+
+`@theme` tokens name concrete families (`--font-display: "Outfit"…`). Do NOT
+point them at `var(--font-inter)`: @theme variables live on `:root` while
+next/font's variable classes land on `<body>` — `var()` substitutes at the
+defining element and silently degrades the entire chain to UA serif.
 
 ## Design tokens (app/globals.css)
 

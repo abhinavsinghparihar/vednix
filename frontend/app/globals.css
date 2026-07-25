@@ -27,15 +27,25 @@
 
   --color-danger: #f0564f;
 
-  /* typography */
-  --font-sans: var(--font-inter), var(--font-noto-dev), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jbmono), ui-monospace, "SF Mono", Menlo, monospace;
+  /* typography — concrete family names, NOT var(--font-*) indirection:
+     @theme lands these tokens on :root, but next/font's variable classes
+     define --font-inter etc. on <body>; var() in a custom property
+     substitutes where the property is defined (:root) → undefined there →
+     guaranteed-invalid → the whole chain silently fell back to UA serif.
+     next/font registers the @font-face family names app-wide regardless,
+     so naming them directly is both correct and simpler. */
+  --font-sans: "Inter", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", "Inter", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* motion */
   --animate-float: float 7s ease-in-out infinite;
   --animate-shimmer: shimmer 2.2s linear infinite;
   --animate-pulse-soft: pulseSoft 2.6s ease-in-out infinite;
   --animate-spin-slow: spin 5s linear infinite;
+  --animate-orbit: orbit 42s linear infinite;
+  --animate-orbit-rev: orbitRev 60s linear infinite;
+  --animate-scroll-cue: scrollCue 1.6s ease-in-out infinite;
 
   --shadow-glow-gold: 0 0 24px -6px rgba(227, 184, 87, 0.55);
   --shadow-card: 0 20px 60px -20px rgba(0, 0, 0, 0.85);
@@ -53,13 +63,29 @@
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
 }
+@keyframes orbit {
+  to { transform: rotate(360deg); }
+}
+@keyframes orbitRev {
+  to { transform: rotate(-360deg); }
+}
+@keyframes scrollCue {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(6px); opacity: 0.35; }
+}
+
+html {
+  scroll-behavior: smooth;
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
 
 html, body {
   height: 100%;
   background: var(--color-void);
   color: var(--color-cream);
   font-family: var(--font-sans);
-  overscroll-behavior: none;
 }
 
 ::selection { background: rgba(227, 184, 87, 0.35); color: #fffdf6; }
