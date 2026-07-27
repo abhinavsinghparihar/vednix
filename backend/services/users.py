@@ -153,7 +153,13 @@ class UserService:
         username = self._norm(username)
         self._check_lockout(ip)
         async with self._sessions() as db:
-            user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
+            # identifier may be a username OR an email (the login field doesn't
+            # force the user to remember which they typed; ambiguity = fail-closed)
+            if "@" in username:
+                rows = (await db.execute(select(User).where(User.email == username))).scalars().all()
+                user = rows[0] if len(rows) == 1 else None
+            else:
+                user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
             # constant-shape failure: same message whether user or password is wrong
             if user is None or not verify_password(password, user.password_hash):
                 self._record_failure(ip)
