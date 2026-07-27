@@ -324,7 +324,10 @@ def test_onboarding_demo_gate_blocks_chat_without_persisting(settings):
 
         choice = client.post("/api/onboarding/mode", json={"mode": "demo"}).json()
         assert choice["demo_active"] is True and choice["mode"] == "demo"
-        assert client.get("/api/onboarding/status").json()["setup_complete"] is False
+        # demo IS a completed first-run choice: the workspace shell must open
+        # for the tour while the engine stays gated. (Leaving setup incomplete
+        # here made /chat redirect straight back to /onboarding — a dead loop.)
+        assert client.get("/api/onboarding/status").json()["setup_complete"] is True
 
         # demo gate: chat burns nothing and explains why
         with client.websocket_connect("/ws/chat") as ws:
@@ -333,6 +336,11 @@ def test_onboarding_demo_gate_blocks_chat_without_persisting(settings):
             assert frame["type"] == "error" and frame["code"] == "demo_mode"
         # demo chats pollute nothing: zero conversations persisted
         assert len(client.get("/api/conversations").json()) == 0
+
+        # exiting the tour = picking a real mode (the "Connect AI" CTA path):
+        # one call atomically clears the gate and arms the engine
+        out = client.post("/api/onboarding/mode", json={"mode": "free"}).json()
+        assert out["demo_active"] is False and out["setup_complete"] is True
 
 
 def test_onboarding_free_mode_completes_setup_and_rearms_engine(settings):

@@ -50,16 +50,17 @@ class OnboardingService:
     async def choose_mode(self, mode: str) -> dict:
         """Wizard step: user picked free / cloud / guest / demo. Demo flips
         the chat gate ON (pure UI exploration); guest flips it OFF — a guest
-        chats for real (local Ollama), history treated as temporary. Either
-        way a completed choice completes first-run setup."""
+        chats for real (local Ollama), history treated as temporary. EVERY
+        choice completes first-run setup — demo included: the tour needs the
+        workspace shell, which only opens once setup is done (leaving setup
+        incomplete made /chat bounce straight back to /onboarding — a dead
+        loop). Re-entering the wizard is just visiting /onboarding again;
+        picking any real mode here atomically clears the demo gate."""
         if mode not in VALID_MODES:
             raise ValueError(f"mode must be one of {sorted(VALID_MODES)}")
         await self._put("mode", mode)
         await self._put("demo_active", "1" if mode == "demo" else "0")
-        # free/cloud/guest are FINAL choices — first-run is done. demo is a
-        # preview; setup stays open so the wizard can be re-entered.
-        if mode != "demo":
-            await self._put("setup_complete", "1")
+        await self._put("setup_complete", "1")
         return await self.status()
 
     async def complete(self) -> dict:
