@@ -14,9 +14,12 @@ router = APIRouter(tags=["system"])
 
 @router.get("/health", response_model=HealthOut)
 async def health(request: Request, core: EngineCore = Depends(get_core)) -> HealthOut:
+    # with the priority router (Phase 7) the honest answer to "which provider"
+    # is the ACTIVE candidate's label, falling back to the env flag in tests
+    provider = getattr(core.llm, "active_label", None) or core.settings.llm_provider
     return HealthOut(
         status="ok",
-        provider=core.settings.llm_provider,
+        provider=provider,
         ollama_available=await core.llm.is_available(),
         default_model=core.llm.model,
         assistant=core.settings.assistant_name,

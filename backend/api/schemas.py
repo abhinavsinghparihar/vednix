@@ -113,3 +113,78 @@ class WSCancel(BaseModel):
 
 class WSPing(BaseModel):
     type: Literal["ping"]
+
+
+# --- REST: auth (Phase 7: onboarding + accounts) ------------------------------
+
+class RegisterIn(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    password: str = Field(min_length=8, max_length=256)
+    display_name: str = Field(default="", max_length=120)
+    email: str | None = Field(default=None, max_length=255)
+
+
+class LoginIn(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+    remember: bool = False
+    device_label: str = Field(default="", max_length=160)
+
+
+class ProfileUpdateIn(BaseModel):
+    display_name: str | None = Field(default=None, max_length=120)
+    avatar_color: str | None = Field(default=None, max_length=16)
+    theme: Literal["system", "dark", "light"] | None = None
+    language: Literal["auto", "hi", "hinglish", "en"] | None = None
+
+
+class ChangePasswordIn(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=8, max_length=256)
+
+
+class UserOut(BaseModel):
+    id: str
+    username: str
+    display_name: str
+    email: str | None
+    role: str
+    avatar_color: str
+    theme: str
+    language: str
+    created_at: datetime
+
+
+class SessionOut(BaseModel):
+    id: str
+    device_label: str
+    remember: bool
+    current: bool
+    last_seen_at: datetime
+    created_at: datetime
+
+
+# --- REST: AI providers (Phase 7) ----------------------------------------------
+
+class ProviderKeyIn(BaseModel):
+    api_key: str = Field(default="", max_length=512)
+    base_url: str | None = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=160)
+
+
+class ProviderToggleIn(BaseModel):
+    enabled: bool
+
+
+class PriorityIn(BaseModel):
+    order: list[str] = Field(min_length=1, max_length=16)
+
+
+# --- REST: onboarding (Phase 7) --------------------------------------------------
+
+class ModeChoiceIn(BaseModel):
+    mode: Literal["free", "cloud", "demo"]
+
+
+class DemoToggleIn(BaseModel):
+    active: bool

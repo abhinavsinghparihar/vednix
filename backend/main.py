@@ -24,36 +24,60 @@ from agents.research import ResearchService
 from ai_engine.engine import EngineCore
 from ai_engine.ollama_client import OllamaClient
 from ai_engine.openrouter_client import OpenRouterClient
-from api import conversations, health, knowledge, memories, uploads, ws_chat
+from api import auth, conversations, health, knowledge, memories, onboarding, providers, uploads, ws_chat
 from config import Settings, get_settings
 from core.auth import BearerAuthMiddleware
+from core.crypto import KeyVault, load_or_create_secret
 from core.logging import get_logger, setup_logging
-from core.rate_limit import build_rate_limiter
+from core.rate_limit import RateLimiter, build_rate_limiter
+from core.session import SessionMiddleware
 from memory.db import create_engine_and_session, init_schema
 from memory.service import MemoryService
 from services.file_store import FileStore
 from services.knowledge import KnowledgeService
+from services.onboarding import OnboardingService
+from services.providers import ProviderService, ResilientLLM
+from services.users import UserService
 
 logger = get_logger(__name__)
 
 
-def _build_llm(settings: Settings):
-    """Provider selection — same interface either way (audit ♻️S2), so the
-    engine, vision routing and model selector never know the difference."""
-    if settings.llm_provider.lower() == "openrouter":
-        return OpenRouterClient(
-            settings.openrouter_api_key,
-            settings.openrouter_model,
-            base_url=settings.openrouter_base_url,
-            timeout=settings.llm_request_timeout,
-            health_ttl=settings.llm_health_ttl,
-        )
-    return OllamaClient(
+def _build_llm(settings: Settings, providers: ProviderService):
+    """The engine always talks to ONE ResilientLLM router. Behind it: Ollama
+    plus every configured cloud provider, walked in priority order with
+    pre-first-token failover (Phase 7). The Phase-5 env OpenRouter switch is
+    preserved as a pinned first candidate when an env key exists."""
+    ollama = OllamaClient(
         settings.ollama_host,
         settings.ollama_model,
         timeout=settings.llm_request_timeout,
         health_ttl=settings.llm_health_ttl,
     )
+    pinned = None
+    if settings.llm_provider.lower() == "openrouter" and settings.openrouter_api_key:
+        from ai_engine.cloud_client import OpenAICompatibleClient
+
+        pinned = (
+            "openrouter (env)",
+            OpenAICompatibleClient(
+                settings.openrouter_api_key,
+                settings.openrouter_model,
+                base_url=settings.openrouter_base_url,
+                provider_name="OpenRouter (env)",
+                timeout=settings.llm_request_timeout,
+                health_ttl=settings.llm_health_ttl,
+                static_models=[settings.openrouter_model],
+            ),
+        )
+    return ResilientLLM(ollama, providers, settings, pinned=pinned)
+
+
+def _data_dir(settings: Settings) -> Path:
+    """Where machine-local secrets live: alongside the sqlite db (or ./data)."""
+    prefix = "sqlite+aiosqlite:///"
+    if settings.database_url.startswith(prefix):
+        return Path(settings.database_url[len(prefix):]).parent
+    return Path("./data")
 
 
 def _ensure_sqlite_dir(database_url: str) -> None:
@@ -77,9 +101,19 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         app.state.settings = settings
         app.state.memory = MemoryService(session_factory)
         app.state.rate_limiter = await build_rate_limiter(settings.redis_url, rate=120, per_seconds=60.0)
+        # dedicated tight bucket for login/register/refresh (brute-force surface)
+        app.state.auth_rate_limiter = RateLimiter(rate=10, per_seconds=60.0)
         app.state.files = FileStore(session_factory, settings)
         app.state.knowledge = KnowledgeService(session_factory, fts_enabled=fts_enabled)
-        llm = llm_client or _build_llm(settings)
+
+        # Phase 7 backbone: machine secret → users/sessions + encrypted keys
+        secret = load_or_create_secret(_data_dir(settings))
+        app.state.secret = secret
+        app.state.users = UserService(session_factory, secret)
+        app.state.providers = ProviderService(session_factory, KeyVault(secret))
+        app.state.onboarding = OnboardingService(session_factory)
+
+        llm = llm_client or _build_llm(settings, app.state.providers)
         # Research agent: constructed whenever a SearXNG URL exists; an empty URL
         # disables internet search cleanly (honest "disabled on this server" reply).
         research = None
@@ -113,6 +147,10 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             logger.info("Vednix AI backend stopped")
 
     app = FastAPI(title="Vednix AI", version="0.1.0", lifespan=lifespan)
+    # Session gate (Phase 7): open while ZERO accounts exist; locks to JWT
+    # the moment somebody registers. Middle of the stack so CORS preflight
+    # never meets a 401.
+    app.add_middleware(SessionMiddleware)
     if settings.auth_token:
         app.add_middleware(BearerAuthMiddleware, token=settings.auth_token)
     # compress REST payloads (conversation lists, KB snippets) — WS frames are
@@ -139,6 +177,9 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
     app.include_router(memories.router, prefix="/api")
     app.include_router(uploads.router, prefix="/api")
     app.include_router(knowledge.router, prefix="/api")
+    app.include_router(auth.router, prefix="/api/auth")
+    app.include_router(providers.router, prefix="/api/providers")
+    app.include_router(onboarding.router, prefix="/api/onboarding")
     app.include_router(ws_chat.router)
     return app
 

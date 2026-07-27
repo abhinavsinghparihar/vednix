@@ -114,3 +114,79 @@ class MemoryItem(Base):
     kind: Mapped[str] = mapped_column(String(24), default="note")  # note|preference|project|task
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class User(Base):
+    """Local account. Vednix runs open (single-user, no login) until the FIRST
+    account is registered — from that moment the API locks to sessions, which
+    is exactly the OS lock-screen semantic the product sells. Passwords are
+    PBKDF2 digests (core/tokens.hash_password), never reversible."""
+
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(120), default="")
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)  # optional, local-first
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="owner")  # owner|member — role-ready
+    avatar_color: Mapped[str] = mapped_column(String(16), default="gold")  # monogram chip tint
+    theme: Mapped[str] = mapped_column(String(16), default="system")  # system|dark|light
+    language: Mapped[str] = mapped_column(String(16), default="auto")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    sessions: Mapped[list["AuthSession"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+
+
+class AuthSession(Base):
+    """A signed-in device. Stores only the refresh-token DIGEST — a db leak
+    yields nothing replayable. Revocation = one row flip (Security → devices)."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    refresh_digest: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    device_label: Mapped[str] = mapped_column(String(160), default="This device")
+    remember: Mapped[bool] = mapped_column(Boolean, default=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class ProviderKey(Base):
+    """A cloud AI provider configuration row. `key_ciphertext` is Fernet
+    (core/crypto.KeyVault) — plaintext NEVER touches the db, logs, or any
+    API response. `key_hint` is the only client-visible echo (`…a1b2`)."""
+
+    __tablename__ = "provider_keys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String(32), unique=True, index=True)  # registry id
+    key_ciphertext: Mapped[str] = mapped_column(Text)  # "" for key-less rows (custom local)
+    key_hint: Mapped[str] = mapped_column(String(12), default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    base_url_override: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    model_override: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="unverified")  # connected|failed|unverified
+    status_detail: Mapped[str] = mapped_column(String(300), default="")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class AppSetting(Base):
+    """Tiny typed key-value table for app-level state that is data, not
+    config: onboarding completion, run mode (free|cloud|demo), provider
+    priority order, demo-mode flag. Server-owned, survives restarts."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

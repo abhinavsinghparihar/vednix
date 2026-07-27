@@ -22,6 +22,7 @@ Phase 4 additions on top of that same single pipeline:
 
 from __future__ import annotations
 
+import inspect
 import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Protocol
@@ -210,11 +211,19 @@ class EngineSession:
         )
         if no_vision:
             await self.state.set(CoreState.IDLE)
-            yield (
-                "Images need a vision-capable model. Quick fix:\n\n"
-                "```bash\nollama pull llama3.2-vision\n```\n\n"
-                "Then attach the image again — Vednix auto-routes to it."
-            )
+            active = getattr(self.core.llm, "active_label", "Ollama")
+            if active == "Ollama":
+                yield (
+                    "Images need a vision-capable model. Quick fix:\n\n"
+                    "```bash\nollama pull llama3.2-vision\n```\n\n"
+                    "Then attach the image again — Vednix auto-routes to it."
+                )
+            else:
+                yield (
+                    f"Your active provider ({active}) has no vision-capable model "
+                    "in its list. Pick a vision model in the model selector, or "
+                    "switch to a local Ollama vision model."
+                )
             return
         effective_model = routed_model or model or None
         if routed_model:
@@ -322,11 +331,28 @@ class EngineSession:
         no_vision = False
         if image_ids:
             desired = requested_model or self.core.llm.model
-            if settings.is_vision_model(desired):
+
+            async def can_see(m: str) -> bool:
+                """Client-aware vision check (cloud providers answer from their
+                registry flag via the router; bare stubs/ollama fall back to
+                the keyword list — audit-compatible either way)."""
+                checker = getattr(self.core.llm, "supports_images", None)
+                if checker is not None:
+                    result = checker(m)
+                    if inspect.isawaitable(result):
+                        result = await result
+                    if result:
+                        return True
+                return settings.is_vision_model(m)
+
+            if await can_see(desired):
                 pass  # requested/default model can already see
             else:
                 available = await self.core.llm.list_models_cached()
-                vision_models = [m for m in available if settings.is_vision_model(m)]
+                vision_models = []
+                for m in available:
+                    if await can_see(m):
+                        vision_models.append(m)
                 if not vision_models:
                     return enriched, [], None, True
                 routed_model = vision_models[0]

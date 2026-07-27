@@ -245,12 +245,26 @@ def test_auth_gate_when_token_set(settings):
 
 # --- provider selection via the app ----------------------------------------------
 
-def test_provider_switch_builds_openrouter(settings):
+def test_provider_switch_env_key_missing_falls_back_to_ollama(settings):
+    """Phase 7 router: llm_provider=openrouter WITHOUT a key must NOT build a
+    client destined to 401 — the router honestly degrades to Ollama-only."""
     cloud = settings.model_copy(update={"llm_provider": "openrouter", "openrouter_api_key": ""})
-    with TestClient(create_app(settings=cloud)) as client:  # no llm injection → real provider wiring
+    with TestClient(create_app(settings=cloud)) as client:  # no llm injection → real wiring
         health = client.get("/api/health").json()
-        assert health["provider"] == "openrouter"
-        assert health["ollama_available"] is False  # missing key → honest unavailable
+        assert health["provider"] == "Ollama"
+        assert health["ollama_available"] is False  # no ollama in the test env
+        assert health["default_model"] == cloud.ollama_model
+
+
+def test_provider_switch_env_key_pins_openrouter_first(settings, monkeypatch):
+    """With a real env key, OpenRouter is pinned as candidate #1 and the
+    router's reported model/label reflect it (no network needed)."""
+    cloud = settings.model_copy(
+        update={"llm_provider": "openrouter", "openrouter_api_key": "sk-or-test-key"}
+    )
+    with TestClient(create_app(settings=cloud)) as client:
+        health = client.get("/api/health").json()
+        assert health["provider"] == "openrouter (env)"  # pinned label wins honestly
         assert health["default_model"] == cloud.openrouter_model
 
 
