@@ -389,3 +389,63 @@ async def test_refresh_rotation_and_get_user_by_session(db, settings):
     await users.logout(refresh_token=rotated.refresh_token)
     with pytest.raises(AuthError):
         await users.refresh(refresh_token=rotated.refresh_token)  # revoked
+
+
+# =============================================================================
+# Phase 7b — guest mode, system status, ollama default model
+# =============================================================================
+
+def test_guest_mode_chats_for_real(settings):
+    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
+        done = client.post("/api/onboarding/mode", json={"mode": "guest"}).json()
+        assert done["mode"] == "guest" and done["demo_active"] is False
+        assert done["setup_complete"] is True  # first-run completes for guests too
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_text('{"type":"user_message","content":"guest hello"}')
+            assert ws.receive_json()["type"] == "conversation_created"
+            assert ws.receive_json()["type"] == "message_started"
+            for _ in range(12):
+                if ws.receive_json()["type"] == "message_done":
+                    break
+        assert len(client.get("/api/conversations").json()) == 1
+
+
+def test_guest_clear_wipes_chats_and_memories(settings):
+    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
+        remember = client.post("/api/memory", json={"content": "guest likes chai"})
+        assert remember.status_code in (200, 201)
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_text('{"type":"user_message","content":"temp history"}')
+            ws.receive_json()
+            ws.receive_json()
+            for _ in range(12):
+                if ws.receive_json()["type"] == "message_done":
+                    break
+        wiped = client.post("/api/onboarding/guest/clear").json()
+        assert wiped["conversations_deleted"] >= 1 and wiped["memories_deleted"] >= 1
+        assert len(client.get("/api/conversations").json()) == 0
+        assert client.get("/api/memory").json() in ({}, [], {"memory": [], "items": []}) or \
+            len((client.get("/api/memory").json() or {}).get("items", [])) == 0
+
+
+def test_system_status_and_ollama_default_model(settings):
+    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
+        # default-model endpoint needs the real router — use an app without
+        # llm injection for that part; system status works on any app.
+        status = client.get("/api/system/status").json()
+        assert status["cpu"]["cores"] >= 1
+        assert status["db_bytes"] > 0
+        assert status["counts"]["conversations"] == 0
+        assert status["ollama"]["models_running"] == []
+
+    with TestClient(create_app(settings=settings)) as client:  # real ResilientLLM
+        before = client.get("/api/providers/ollama/default-model").json()
+        assert before["saved"] is False and before["model"] == "fake-model"
+        put = client.put(
+            "/api/providers/ollama/default-model", json={"model": "qwen2.5:7b"}
+        )
+        assert put.status_code == 200 and put.json()["saved"] is True
+        after = client.get("/api/providers/ollama/default-model").json()
+        assert after["model"] == "qwen2.5:7b" and after["saved"] is True
+        health = client.get("/api/health").json()
+        assert health["default_model"] == "qwen2.5:7b"  # live-applied to the router

@@ -259,6 +259,26 @@ class ProviderService:
             await db.commit()
         return clean
 
+    # --- Ollama default model (wizard's "select model → save") -------------------------
+
+    async def get_ollama_default(self) -> str | None:
+        async with self._sessions() as db:
+            row = await db.get(AppSetting, "ollama_default_model")
+            return row.value if row and row.value else None
+
+    async def set_ollama_default(self, model: str) -> str:
+        model = model.strip()
+        if not model:
+            raise ValueError("Model name is required.")
+        async with self._sessions() as db:
+            row = await db.get(AppSetting, "ollama_default_model")
+            if row is None:
+                db.add(AppSetting(key="ollama_default_model", value=model))
+            else:
+                row.value = model
+            await db.commit()
+        return model
+
     # --- verification (the "Test connection" button) --------------------------------
 
     async def _row(self, provider: str) -> ProviderKey | None:
@@ -394,6 +414,13 @@ class ResilientLLM:
 
     async def _client_for(self, provider: str) -> "object | None":
         if provider == "ollama":
+            # honor the wizard's saved default model (survives restarts)
+            try:
+                default = await self._service.get_ollama_default()
+                if default:
+                    self._ollama.model = default
+            except Exception:
+                logger.exception("ollama default-model lookup failed (non-fatal)")
             return self._ollama
         row = await self._service._row(provider)
         if row is None:
@@ -440,6 +467,7 @@ class ResilientLLM:
         return self._active_label
 
     async def supports_images(self, model: str | None = None) -> bool:
+
         """Would the FIRST candidate provider see images with this model?
         Ollama answers via the settings keyword list; cloud clients know
         their own registry flag. Engine duck-types this (stubs may omit it)."""
@@ -477,6 +505,22 @@ class ResilientLLM:
             else:
                 return True  # a configured, enabled cloud provider counts as available
         return False
+
+    def apply_ollama_default_now(self, model: str) -> None:
+        """Live-apply the wizard's saved model without waiting for the next
+        turn's candidates rebuild (the Settings page confirms instantly)."""
+        self._ollama.model = model
+
+    async def ollama_ps(self) -> list[dict]:
+        """Currently-loaded Ollama models (/api/ps) — the Profile page's
+        CPU/GPU card reads VRAM residency from here. [] when unreachable."""
+        ps = getattr(self._ollama, "ps", None)
+        if ps is None:
+            return []
+        try:
+            return await ps()
+        except OllamaError:
+            return []
 
     async def list_models_cached(self, ttl: float = 30.0) -> list[str]:
         """Models the ACTIVE (first reachable) provider can actually serve —

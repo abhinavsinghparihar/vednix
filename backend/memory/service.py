@@ -160,3 +160,24 @@ class MemoryService:
     async def get(self, item_id: int) -> MemoryItem | None:
         async with self._sessions() as session:
             return await session.get(MemoryItem, item_id)
+
+    # --- Phase 7: machine stats + guest wipe --------------------------------
+
+    async def stats(self) -> dict:
+        """Counts powering the Profile page's memory-usage card."""
+        async with self._sessions() as session:
+            convs = (await session.execute(select(func.count(Conversation.id)))).scalar_one()
+            msgs = (await session.execute(select(func.count(Message.id)))).scalar_one()
+            mems = (await session.execute(select(func.count(MemoryItem.id)))).scalar_one()
+            return {"conversations": int(convs), "messages": int(msgs), "memories": int(mems)}
+
+    async def wipe_chats_and_memories(self) -> dict:
+        """Guest 'temporary history' made literal: every conversation (its
+        messages cascade) and every long-term memory dies NOW. Knowledge
+        documents and uploaded files survive — the user added those on
+        purpose, file by file; they're cleared separately in Settings."""
+        async with self._sessions() as session:
+            mems = await session.execute(delete(MemoryItem))
+            convs = await session.execute(delete(Conversation))
+            await session.commit()
+            return {"conversations_deleted": convs.rowcount, "memories_deleted": mems.rowcount}

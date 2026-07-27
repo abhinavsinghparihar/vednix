@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from api.deps import get_core, get_onboarding, get_users
+from api.deps import get_core, get_memory, get_onboarding, get_users
 from api.schemas import DemoToggleIn, ModeChoiceIn
 from services.onboarding import OnboardingService
 
@@ -75,3 +75,10 @@ async def demo(body: DemoToggleIn,
 @router.get("/local-models")
 async def local_models() -> dict:
     return {"models": RECOMMENDED_MODELS}
+
+
+@router.post("/guest/clear")
+async def guest_clear(memory=Depends(get_memory)) -> dict:
+    """'History (temporary)' made literal — one button, everything the guest
+    typed and every long-term memory, gone. Files/KB survive by design."""
+    return await memory.wipe_chats_and_memories()

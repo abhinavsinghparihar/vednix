@@ -24,7 +24,7 @@ from agents.research import ResearchService
 from ai_engine.engine import EngineCore
 from ai_engine.ollama_client import OllamaClient
 from ai_engine.openrouter_client import OpenRouterClient
-from api import auth, conversations, health, knowledge, memories, onboarding, providers, uploads, ws_chat
+from api import auth, conversations, health, knowledge, memories, onboarding, providers, system, uploads, ws_chat
 from config import Settings, get_settings
 from core.auth import BearerAuthMiddleware
 from core.crypto import KeyVault, load_or_create_secret
@@ -161,6 +161,10 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         allow_origins=settings.cors_origins_list,
         allow_methods=["*"],
         allow_headers=["*"],
+        # httpOnly refresh cookie must cross the dev origin boundary
+        # (localhost:3000 → :8000). Explicit origins above are required
+        # for credentials mode (wildcard would be rejected).
+        allow_credentials=True,
     )
 
     @app.middleware("http")
@@ -180,6 +184,7 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
     app.include_router(auth.router, prefix="/api/auth")
     app.include_router(providers.router, prefix="/api/providers")
     app.include_router(onboarding.router, prefix="/api/onboarding")
+    app.include_router(system.router, prefix="/api")
     app.include_router(ws_chat.router)
     return app
 

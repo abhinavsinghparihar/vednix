@@ -91,6 +91,24 @@ class OllamaClient:
         self._models_until = now + ttl
         return models
 
+    async def ps(self) -> list[dict]:
+        """Running models (/api/ps): name, total size, size_vram (0 ⇒ fully on
+        CPU — the honest GPU/CPU residency signal for the Profile page)."""
+        try:
+            resp = await self._client.get("/api/ps")
+            resp.raise_for_status()
+            rows = resp.json().get("models", [])
+            return [
+                {
+                    "name": m.get("name", ""),
+                    "size": int(m.get("size", 0) or 0),
+                    "size_vram": int(m.get("size_vram", 0) or 0),
+                }
+                for m in rows
+            ]
+        except (httpx.HTTPError, ValueError) as exc:
+            raise OllamaError(f"Could not query /api/ps at {self.host}: {exc}") from exc
+
     # --- chat --------------------------------------------------------------
 
     def _payload(

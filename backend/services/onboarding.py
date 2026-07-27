@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from memory.models import AppSetting
 
-VALID_MODES = {"free", "cloud", "demo"}
+VALID_MODES = {"free", "cloud", "demo", "guest"}
 
 
 class OnboardingService:
@@ -48,15 +48,17 @@ class OnboardingService:
         return (await self._get("demo_active")) == "1"
 
     async def choose_mode(self, mode: str) -> dict:
-        """Wizard step: user picked free / cloud / demo. Demo flips the chat
-        gate on immediately; free/cloud flip it OFF (a returning AIS can
-        always be re-gated by re-entering demo from Settings)."""
+        """Wizard step: user picked free / cloud / guest / demo. Demo flips
+        the chat gate ON (pure UI exploration); guest flips it OFF — a guest
+        chats for real (local Ollama), history treated as temporary. Either
+        way a completed choice completes first-run setup."""
         if mode not in VALID_MODES:
             raise ValueError(f"mode must be one of {sorted(VALID_MODES)}")
         await self._put("mode", mode)
         await self._put("demo_active", "1" if mode == "demo" else "0")
-        if mode in ("free", "cloud"):
-            # finishing the wizard path counts as setup; demo stays "open"
+        # free/cloud/guest are FINAL choices — first-run is done. demo is a
+        # preview; setup stays open so the wizard can be re-entered.
+        if mode != "demo":
             await self._put("setup_complete", "1")
         return await self.status()
 
