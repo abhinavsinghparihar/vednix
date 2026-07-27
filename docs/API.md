@@ -109,3 +109,58 @@ B3) with citations `[1]…` and a `sources` list on `message_done`.
 `Authorization: Bearer <token>` (WS accepts `?token=` too; `/api/health` stays
 open). Empty token = open single-user local mode. `VEDNIX_REDIS_URL` moves
 rate-limit state to Redis (falls back to in-process with a warning).
+
+## Accounts (Phase 7)
+
+Session middleware locks every API+WS once ≥1 user exists (before that the
+machine is open — Vednix's original single-user default). Open paths: health,
+auth login/register/refresh/logout, onboarding status. Access JWT (HS256,
+20 min, jti) travels in the `Authorization` header only; the refresh token is
+an httpOnly cookie **path-scoped to /api/auth** (12 h, or 30 d with
+remember-me) with rotation + reuse-death. Cookie routes enforce the CSRF
+double-submit pair (`vednix_csrf` cookie + `X-CSRF-Token` header); no cookies
+at all ⇒ 401 on the lock, cookie-auth without the pair ⇒ 403.
+Auth bucket: 10/min/IP, 5 failures → 5 min lockout.
+
+```
+POST   /api/auth/register        {username|email(+display_name),password,remember} → tokens
+POST   /api/auth/login           username OR email in one field · remember → rt cookie
+POST   /api/auth/refresh         rt cookie + CSRF → rotated tokens (reuse ⇒ revoke family)
+POST   /api/auth/logout          revokes this device, clears both cookies
+GET    /api/auth/me              current user · PATCH /api/auth/me {display_name,theme,language}
+POST   /api/auth/me/password     {current_password,new_password} ⇒ revokes ALL sessions
+GET    /api/auth/sessions        devices · DELETE /api/auth/sessions/{id} revoke one
+```
+
+## AI providers (Phase 7)
+
+Priority failover across Ollama + configured clouds: the next provider answers
+before the first token with a visible handoff line; mid-stream failures never
+replay (honest). Keys are Fernet-encrypted on disk (machine-bound secret at
+data/secret.key, 0600); API never returns more than the last 4 chars.
+
+```
+GET    /api/providers/catalog                    10 providers: labels, key/docs urls, models
+GET    /api/providers                            configured rows + priority order
+PUT    /api/providers/{id}/key                   save (verify optional) · DELETE …/key remove
+POST   /api/providers/{id}/verify                live connection test → connected|failed
+POST   /api/providers/{id}/toggle                enable/disable · PUT /api/providers/priority
+GET    /api/providers/ollama/status              running + installed models + detail
+GET|PUT /api/providers/ollama/default-model      engine-wide default, hot-applied
+```
+
+## Onboarding & system (Phase 7)
+
+```
+GET    /api/onboarding/status    setup_complete, mode, demo_active, auth_enabled,
+                                 ollama_running, active_provider label
+POST   /api/onboarding/mode      {mode: free|cloud|guest|demo} — every choice completes
+                                 setup; demo flips demo_active (WS gate, zero persistence)
+POST   /api/onboarding/demo      {active} direct gate control · POST /api/onboarding/complete
+GET    /api/onboarding/local-models  recommended Ollama models w/ RAM·disk·speed specs
+POST   /api/onboarding/guest/clear   wipe conversations+memories (temporary history, literal)
+GET    /api/system/status        db/upload bytes, row counts, cpu cores+load, ollama ps VRAM
+```
+
+Offline password recovery (no SMTP by design): `python scripts/reset_password.py`
+on the machine — prompts for the account, revokes every session, sets a new one.

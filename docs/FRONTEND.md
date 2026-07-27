@@ -180,3 +180,36 @@ is real: model → WS payload, temperature → WS payload
   search → fetch → critique → refine → build) above the reply; the latest chip
   pulses while the agents work, the full trace stays on the message.
 - Sources continue to render as gold citation links under the reply.
+
+## Phase 7 — accounts, onboarding & run modes (shipped)
+
+```
+app/login/page.tsx          split-screen lock (AuthShell) · user-or-email · remember-me
+ │                          · forgot view (offline reset CLI) · quick CTAs guest/ollama/cloud
+app/signup/page.tsx         name · derived username · live email check · strength meter · terms
+app/onboarding/page.tsx     ceremony: welcome → mode (free/cloud/guest/demo link) → wizard → done
+ ├─ onboarding/OllamaWizard explain→download→install→connect(2.5s auto-detect)+model picker
+ └─ onboarding/CloudWizard  provider grid → guided save→verify per provider
+app/profile/page.tsx        monogram hero · stat cards · compute(+VRAM) · devices+revoke
+ │                          · change password (revokes all) · guest wipe variant
+app/settings/page.tsx       11 tabs: General·Appearance·Language·Voice·AI Models·Ollama
+ │                          ·API Keys·Memory·Privacy·Experimental·About (+ mobile bottom bar)
+components/auth/            AuthShell (manifesto split) · fields (animated inputs/errors)
+lib/tokenVault.ts           access token lives ONLY in module memory; single-flight refresh;
+                            credentialed apiFetch + one 401 retry + CSRF double-submit
+store/auth.ts               onboarding/session bootstrap · lib/useGuard.ts = THE routing law
+```
+
+### The routing law (lib/useGuard.ts)
+backend down → allow (workspace shows offline UI) · setup incomplete → /onboarding ·
+locked world (accounts exist, no session) on /profile /settings → /login?next=… ·
+/chat self-guards (locked → /login?next=/chat) · guests roam a ZERO-ACCOUNT machine
+(open local mode, Vednix's original default).
+
+### Run modes (server-owned: app_settings)
+free / cloud / guest complete setup. demo additionally flips demo_active: the
+workspace opens as a tour while the WS engine answers `{error: demo_mode}` and
+persists nothing; picking any real mode clears the gate atomically (chat's
+"Connect AI" CTAs land on /onboarding). guest = real local chat, temporary
+history (profile ⋮ wipe). Deep links: /chat?view=dash|chat|knowledge|memory.
+Ribbons in the chat view mirror the active mode.
