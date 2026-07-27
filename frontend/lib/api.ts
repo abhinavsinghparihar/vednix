@@ -4,34 +4,16 @@
  */
 
 import type { Language } from "./ws";
+import { API_BASE, WS_URL } from "./config";
+import { ApiError, apiFetch } from "./tokenVault";
 
-// 127.0.0.1 over bare "localhost": on IPv6-first systems "localhost" resolves
-// to ::1 while the backend binds 127.0.0.1 — fetch() then fails hard instead of
-// falling back (observed live). Still overridable via NEXT_PUBLIC_API_BASE.
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
-export const WS_URL = process.env.NEXT_PUBLIC_WS_BASE ?? "ws://127.0.0.1:8000/ws/chat";
-
-export class ApiError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+export { API_BASE, WS_URL };
+export { ApiError };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`${API_BASE}${path}`, {
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
-  if (!resp.ok) {
-    let message = resp.statusText;
-    try {
-      const body = await resp.json();
-      message = body.detail ?? message;
-    } catch { /* non-JSON error body */ }
-    throw new ApiError(resp.status, message);
-  }
-  if (resp.status === 204) return undefined as T;
-  return (await resp.json()) as T;
+  // Since Phase 7 every request can meet a locked API: the vault injects the
+  // memory-held access token and silently refreshes on a single 401.
+  return apiFetch<T>(path, init);
 }
 
 export interface ConversationSummary {

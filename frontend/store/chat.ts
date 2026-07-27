@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { api, WS_URL, type ConversationSummary, type UploadedFileMeta } from "@/lib/api";
+import { getAccessToken } from "@/lib/tokenVault";
 import { WSClient, type CoreStateName, type Language, type ServerFrame, type WSStatus } from "@/lib/ws";
 import { tts } from "@/lib/tts";
 import { detectSpeechLang, sanitizeForSpeech } from "@/lib/speechText";
@@ -220,7 +221,11 @@ export const useChat = create<ChatStore>((set, get) => {
   function ensureWs(): WSClient | null {
     if (ws) return ws;
     if (typeof window === "undefined") return null;
-    ws = new WSClient(WS_URL, handleFrame, (status) => set({ wsStatus: status }));
+    // Locked API: browsers can't put Authorization on a WS upgrade, so the
+    // access token rides as ?token= (the backend's documented WS fallback).
+    const token = getAccessToken();
+    const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+    ws = new WSClient(url, handleFrame, (status) => set({ wsStatus: status }));
     ws.connect();
     return ws;
   }

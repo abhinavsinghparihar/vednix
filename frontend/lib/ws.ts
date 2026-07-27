@@ -69,8 +69,15 @@ export class WSClient {
         // malformed frames are ignored — server never sends them
       }
     };
-    this.ws.onclose = () => {
+    this.ws.onclose = (ev) => {
       this.onStatus("closed");
+      // 4401/4403 = the session gate rejected us (locked API, no/expired
+      // session). Retrying forever would just spin — stop; the auth store
+      // reroutes the shell and a fresh WSClient is built after sign-in.
+      if (ev.code === 4401 || ev.code === 4403) {
+        this.closedByUser = true;
+        return;
+      }
       if (!this.closedByUser) this.scheduleReconnect();
     };
     this.ws.onerror = () => this.ws?.close();
