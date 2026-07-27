@@ -7,7 +7,8 @@
 
 "use client";
 
-import { BookOpen, BrainCircuit, LayoutGrid, MessageSquare } from "lucide-react";
+import Link from "next/link";
+import { BookOpen, BrainCircuit, LayoutGrid, MessageSquare, Settings2, UserRound } from "lucide-react";
 import { useChat, type WorkspaceView } from "@/store/chat";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { cn } from "@/lib/utils";
@@ -58,6 +59,23 @@ export function Rail() {
       })}
 
       <div className="mt-auto flex flex-col items-center gap-3">
+        <span className="h-px w-7 bg-white/[0.08]" />
+        <Link
+          href="/settings"
+          aria-label="Settings"
+          title="Settings"
+          className="flex h-10 w-10 items-center justify-center rounded-2xl text-muted transition-all duration-300 hover:bg-white/[0.05] hover:text-cream"
+        >
+          <Settings2 className="h-[17px] w-[17px]" />
+        </Link>
+        <Link
+          href="/profile"
+          aria-label="Profile"
+          title="Profile"
+          className="flex h-10 w-10 items-center justify-center rounded-2xl text-muted transition-all duration-300 hover:bg-white/[0.05] hover:text-cream"
+        >
+          <UserRound className="h-[17px] w-[17px]" />
+        </Link>
         <ThemeToggle />
         <span
           aria-label="Made by Abhinav Singh"
