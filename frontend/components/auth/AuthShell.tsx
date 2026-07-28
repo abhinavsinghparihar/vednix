@@ -68,7 +68,7 @@ function Manifesto() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.85 }}
           >
-            Offline-first. Multilingual. Yours entirely — every reply, every
+            Private-first. Multilingual. Yours entirely — every reply, every
             memory, every key stays on this machine.
           </motion.p>
         </div>

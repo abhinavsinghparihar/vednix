@@ -93,7 +93,7 @@ function ConversationRow({ conv, active }: { conv: ConversationSummary; active: 
 
 export function Sidebar() {
   const { conversations, activeId, newChat, loadingConversations, wsStatus, ollamaAvailable, sidebarOpen, provider } = useChat();
-  const providerLabel = provider === "openrouter" ? "OpenRouter" : "Ollama";
+  const providerLabel = provider === "openrouter" ? "OpenRouter" : "Engine";
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {

@@ -84,7 +84,7 @@ export function DashboardView() {
         <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted">
           Vednix is{" "}
           <span className={cn("font-semibold", ollamaAvailable ? "text-gold-bright" : "text-danger")}>
-            {ollamaAvailable ? "live and local" : "offline — backend not reachable"}
+            {ollamaAvailable ? "live and local" : "backend not reachable"}
           </span>
           . Pick up where you left off, or start something new.
         </p>

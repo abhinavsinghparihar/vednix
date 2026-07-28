@@ -52,8 +52,8 @@ function ExplainStep({ next, models }: { next: () => void; models: LocalModelRec
     <div>
       <StepTitle
         kicker="Local mode · step 1 of 4"
-        title="Meet Ollama"
-        sub="A tiny engine that runs open AI models right on this computer. Vednix talks to it, you own everything."
+        title="Meet the Vednix Engine"
+        sub="A tiny engine that runs open AI models right on this computer (built on the open Ollama runtime). Vednix talks to it, you own everything."
       />
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -129,8 +129,8 @@ function DownloadStep({ next, back }: { next: () => void; back: () => void }) {
     <div>
       <StepTitle
         kicker="Local mode · step 2 of 4"
-        title="Download Ollama"
-        sub="Browsers can't silently install software (a good thing) — so this step is one honest click on the official page."
+        title="Download the Engine"
+        sub="Browsers can't silently install software (a good thing) — so this step is one honest click on the official engine download page."
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -171,9 +171,9 @@ function DownloadStep({ next, back }: { next: () => void; back: () => void }) {
 
 function InstallStep({ next, back, selectedModel }: { next: () => void; back: () => void; selectedModel: string }) {
   const steps = [
-    { n: "01", title: "Install Ollama", body: "Run the installer you downloaded. On Windows/Mac it lives in the tray and starts itself." },
+    { n: "01", title: "Install the Engine", body: "Run the installer you downloaded. On Windows/Mac it lives in the tray and starts itself." },
     { n: "02", title: "Start the engine", body: "Terminal/command prompt (only needed if it isn't already running):", cmd: "ollama serve" },
-    { n: "03", title: "Fetch your model", body: "One download, then offline forever:", cmd: `ollama pull ${selectedModel}` },
+    { n: "03", title: "Fetch your model", body: "One download, then it's on your machine forever:", cmd: `ollama pull ${selectedModel}` },
   ];
   return (
     <div>
@@ -265,7 +265,7 @@ function ConnectStep({
       <StepTitle
         kicker="Local mode · step 4 of 4"
         title="Connecting…"
-        sub="Vednix probes localhost:11434 every few seconds — install Ollama and this card turns green by itself."
+        sub="Vednix probes localhost:11434 every few seconds — install the Engine and this card turns green by itself."
       />
 
       <motion.div
@@ -283,7 +283,7 @@ function ConnectStep({
             <StatusDot tone={running ? "ok" : "fail"} pulse={running} />
           )}
           <span className={cn("font-display text-xl font-bold", running ? "text-emerald-300" : "text-cream")}>
-            {running ? "Connected" : checking ? "Looking for Ollama…" : "Not detected yet"}
+            {running ? "Connected" : checking ? "Looking for the engine…" : "Not detected yet"}
           </span>
         </div>
 
@@ -314,7 +314,7 @@ function ConnectStep({
               </div>
             ) : (
               <div className="space-y-3">
-                <p className="text-[13px] text-muted">Ollama is up, but no model is installed yet. Run:</p>
+                <p className="text-[13px] text-muted">The engine is up, but no model is installed yet. Run:</p>
                 <div className="mx-auto max-w-xs"><CopyChip text={`ollama pull ${selectedModel}`} /></div>
               </div>
             )}

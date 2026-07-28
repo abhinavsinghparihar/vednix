@@ -1,18 +1,17 @@
 /**
- * The VEDNIX wordmark — gold-bevelled "V" in a squircle + tracked caps.
+ * The VEDNIX wordmark — the animated NEURAL V sigil + tracked caps.
  * Server-safe (no hooks): usable from loading screens, footers and client
- * chrome alike.
+ * chrome alike. The mark animates everywhere, always — it IS the brand.
  */
 
 import { cn } from "@/lib/utils";
 import { BRAND_NAME } from "@/lib/brand";
+import { LogoMark } from "@/components/brand/LogoMark";
 
 export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn("flex items-center gap-2.5", className)}>
-      <span className="flex h-8 w-8 items-center justify-center rounded-[10px] border border-gold/40 bg-gradient-to-br from-gold/20 to-ember/10 font-display text-base font-extrabold text-gold-bright shadow-glow-gold">
-        V
-      </span>
+      <LogoMark size={32} />
       <span className="font-display text-sm font-bold tracking-[0.32em] text-cream">
         {BRAND_NAME.replace(" AI", "").toUpperCase()}
       </span>

@@ -226,7 +226,7 @@ export function Composer() {
 
         <p className="mt-2 flex items-center justify-center gap-2 text-center text-[10px] tracking-wide text-faint">
           <span className={cn("h-1 w-1 rounded-full", coreState === "IDLE" ? "bg-faint" : "bg-gold animate-pulse-soft")} />
-          Vednix runs fully offline · replies mirror your language · verify important info
+          Vednix runs on your machine · replies mirror your language · verify important info
         </p>
       </div>
     </div>

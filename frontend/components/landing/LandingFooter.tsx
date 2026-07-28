@@ -16,7 +16,7 @@ export function LandingFooter() {
         </Link>
         <Signature framed />
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-faint">
-          Offline-first · No telemetry · © 2026
+          Private-first · No telemetry · © 2026
         </p>
       </div>
     </footer>

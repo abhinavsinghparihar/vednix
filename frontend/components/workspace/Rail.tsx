@@ -11,6 +11,8 @@ import Link from "next/link";
 import { BookOpen, BrainCircuit, LayoutGrid, MessageSquare, Settings2, UserRound } from "lucide-react";
 import { useChat, type WorkspaceView } from "@/store/chat";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
+import { LogoMark } from "@/components/brand/LogoMark";
+import { TricolorSignatureText } from "@/components/brand/Signature";
 import { cn } from "@/lib/utils";
 
 const ITEMS: { view: WorkspaceView; label: string; icon: typeof LayoutGrid }[] = [
@@ -29,13 +31,8 @@ export function Rail() {
       aria-label="Workspace views"
       className="glass-liquid z-30 m-3 ml-3 mr-0 hidden w-[62px] shrink-0 flex-col items-center gap-2 rounded-3xl py-4 md:flex"
     >
-      {/* V mark */}
-      <span
-        aria-hidden
-        className="mb-2 flex h-9 w-9 items-center justify-center rounded-xl border border-gold/40 bg-gradient-to-br from-gold/20 to-ember/10 font-display text-sm font-extrabold text-gold-bright shadow-glow-gold"
-      >
-        V
-      </span>
+      {/* the neural V — animated, always */}
+      <LogoMark size={38} className="mb-2" />
 
       {ITEMS.map((it) => {
         const active = view === it.view;
@@ -79,9 +76,9 @@ export function Rail() {
         <ThemeToggle />
         <span
           aria-label="Made by Abhinav Singh"
-          className="font-mono text-[8px] uppercase tracking-[0.26em] text-faint [writing-mode:vertical-rl]"
+          className="font-mono text-[8px] uppercase tracking-[0.26em] [writing-mode:vertical-rl]"
         >
-          Made by Abhinav Singh
+          <TricolorSignatureText />
         </span>
       </div>
     </nav>

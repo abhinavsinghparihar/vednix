@@ -83,7 +83,7 @@ function VoiceSection() {
           disabled={!ttsSupported}
           onClick={() =>
             tts.speak(
-              "नमस्ते! मैं Vednix हूँ — I'm your offline AI workspace.",
+              "नमस्ते! मैं Vednix हूँ — I'm your personal AI workspace.",
               "hi-IN",
             )
           }
@@ -91,7 +91,7 @@ function VoiceSection() {
           <Play className="h-3 w-3" /> Test voice
         </Button>
         <p className="text-[10.5px] leading-snug text-faint">
-          Replies read aloud using your OS voices (offline). Dictation: tap the mic
+          Replies read aloud using your OS voices (on-device). Dictation: tap the mic
           — hi-IN handles हिंदी + Hinglish.
         </p>
       </GlassPanel>
@@ -133,7 +133,7 @@ export function ControlPanel() {
                   {modelOptions.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
-                  {modelOptions.length === 0 && <option value="">qwen2.5:3b (offline)</option>}
+                  {modelOptions.length === 0 && <option value="">qwen2.5:3b (local)</option>}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               </div>

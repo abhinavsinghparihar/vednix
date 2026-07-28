@@ -15,7 +15,7 @@ const notoDev = Noto_Sans_Devanagari({
 export const metadata: Metadata = {
   title: "Vednix AI — The Next Generation AI Workspace",
   description:
-    "Offline-first, multilingual AI workspace. Hindi, Hinglish, English — your language, your machine, your data.",
+    "Private-first, multilingual AI workspace. Hindi, Hinglish, English — your language, your machine, your data.",
   applicationName: "Vednix AI",
 };
 

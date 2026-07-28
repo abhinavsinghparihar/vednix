@@ -86,7 +86,7 @@ export function Hero() {
                 <span className="absolute h-full w-full animate-ping rounded-full bg-gold/60" />
                 <span className="relative h-1.5 w-1.5 rounded-full bg-gold" />
               </span>
-              <MicroLabel>Offline-first AI workspace</MicroLabel>
+              <MicroLabel>Your personal AI workspace</MicroLabel>
             </span>
           </Reveal>
 

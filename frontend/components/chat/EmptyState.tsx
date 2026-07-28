@@ -48,7 +48,7 @@ export function EmptyState() {
         transition={{ delay: 0.25, duration: 0.5 }}
         className="mt-3 max-w-md text-center text-sm leading-relaxed text-muted"
       >
-        Your offline AI workspace — Hindi, Hinglish या English, किसी भी भाषा में बात कीजिए.
+        Your personal AI workspace — Hindi, Hinglish या English, किसी भी भाषा में बात कीजिए.
         <br />
         Everything runs on <span className="text-gold/90">your machine</span>. Nothing leaves it.
       </motion.p>

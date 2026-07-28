@@ -13,7 +13,7 @@ const ITEMS = [
   {
     icon: Cpu,
     title: "Local-first intelligence",
-    body: "Streams tokens from Ollama on your own machine. Model, temperature and language, dialled in live — Hindi, Hinglish or English.",
+    body: "Streams tokens from the Vednix Engine on your own machine. Model, temperature and language, dialled in live — Hindi, Hinglish or English.",
     tag: "engine.stream_reply",
   },
   {

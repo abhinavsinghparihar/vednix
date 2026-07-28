@@ -82,7 +82,7 @@ export function KnowledgeView() {
             </h1>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted">
               Documents indexed here are searched automatically and cited into chat answers —
-              offline, FTS5 + BM25, with «snippets» proving where answers came from.
+              on-device FTS5 + BM25, with «snippets» proving where answers came from.
             </p>
           </div>
           <Signature framed className="mt-4" />
