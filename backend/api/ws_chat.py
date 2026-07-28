@@ -86,22 +86,6 @@ async def _autotitle(
         logger.warning("auto-title failed (conv=%s)", conversation_id)
 
 
-async def _demo_gate(sender: WSSender, app) -> bool:
-    """Demo mode (Phase 7): the workspace is explorable, but the engine stays
-    off — answer with a friendly, actionable frame instead of burning calls."""
-    try:
-        if await app.state.onboarding.is_demo_active():
-            await sender.send({
-                "type": "error", "code": "demo_mode",
-                "message": "Demo mode is on — connect Ollama or a cloud provider "
-                           "(Rail → Settings → AI Providers) to start chatting.",
-            })
-            return True
-    except Exception:
-        logger.exception("demo gate check failed (fail-open: chat proceeds)")
-    return False
-
-
 async def _stream_reply(
     session: EngineSession,
     sender: WSSender,
@@ -208,10 +192,6 @@ async def ws_chat(ws: WebSocket) -> None:
                     continue
                 except ValueError as exc:
                     await sender.send({"type": "error", "code": "invalid", "message": str(exc)})
-                    continue
-
-                # Phase 7 demo mode: explore everything, burn nothing.
-                if await _demo_gate(sender, ws.app):
                     continue
 
                 # Resolve attachments (uploaded earlier via POST /api/uploads).

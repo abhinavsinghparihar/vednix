@@ -51,12 +51,14 @@ class ProviderSpec:
     blurb: str = ""
 
 
+ENGINE_LABEL = "Vednix Engine"  # the brand every user-facing label wears
+
 REGISTRY: dict[str, ProviderSpec] = {p.id: p for p in [
     ProviderSpec(
-        "ollama", "Ollama", "ollama", "", "qwen2.5:3b",
+        "ollama", ENGINE_LABEL, "ollama", "", "qwen2.5:3b",
         "https://ollama.com", "https://github.com/ollama/ollama/blob/main/docs/api.md",
         True, ("qwen2.5:3b", "qwen2.5:7b"), needs_key=False,
-        blurb="Free, offline, 100% private — models run on this machine.",
+        blurb="Free, private, unlimited — the Vednix Engine runs models on this machine.",
     ),
     ProviderSpec(
         "openrouter", "OpenRouter", "openai", "https://openrouter.ai/api/v1",
@@ -403,7 +405,7 @@ class ResilientLLM:
         # env-forced first candidate (legacy VEDNIX_LLM_PROVIDER=openrouter path)
         self._pinned = pinned
         self._cloud_cache: dict[str, tuple[float, object]] = {}  # provider → (row version, client)
-        self._active_label = pinned[0] if pinned else "Ollama"
+        self._active_label = pinned[0] if pinned else ENGINE_LABEL
         self.last_handoff: str | None = None  # one-line notice for the current turn
 
     # -- client cache (rebuilt when a row's updated_at changes) -------------
@@ -484,7 +486,7 @@ class ResilientLLM:
         for provider, client in await self._candidates():
             if provider == "ollama":
                 if await client.is_available():
-                    self._active_label = "Ollama"
+                    self._active_label = ENGINE_LABEL
                     try:
                         return await client.list_models()
                     except OllamaError:
@@ -528,7 +530,7 @@ class ResilientLLM:
         for provider, client in await self._candidates():
             if provider == "ollama":
                 if await client.is_available():  # type: ignore[attr-defined]
-                    self._active_label = "Ollama"
+                    self._active_label = ENGINE_LABEL
                     return await client.list_models_cached(ttl)  # type: ignore[attr-defined]
             else:
                 self._active_label = getattr(client, "provider_name", provider)
@@ -540,11 +542,11 @@ class ResilientLLM:
         errors: list[str] = []
         for provider, client in await self._candidates():
             if provider == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
-                errors.append("Ollama: offline")
+                errors.append(f"{ENGINE_LABEL}: not running")
                 continue
             try:
                 result = await client.chat(messages, temperature, model=model, images=images)  # type: ignore[attr-defined]
-                self._active_label = getattr(client, "provider_name", "Ollama")
+                self._active_label = getattr(client, "provider_name", ENGINE_LABEL)
                 return result
             except OllamaError as exc:
                 errors.append(f"{getattr(client, 'provider_name', provider)}: {exc}")
@@ -557,9 +559,9 @@ class ResilientLLM:
         self.last_handoff = None
         for provider, client in await self._candidates():
             if provider == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
-                errors.append("Ollama: offline")
+                errors.append(f"{ENGINE_LABEL}: not running")
                 continue
-            label = getattr(client, "provider_name", "Ollama")
+            label = getattr(client, "provider_name", ENGINE_LABEL)
             started = False
             try:
                 async for chunk in client.chat_stream(  # type: ignore[attr-defined]
@@ -568,9 +570,9 @@ class ResilientLLM:
                     if not started:
                         started = True
                         self._active_label = label
-                        if errors and label != "Ollama":
+                        if errors and label != ENGINE_LABEL:
                             self.last_handoff = (
-                                f"⚡ Ollama unreachable — answered by **{label}** instead.\n\n"
+                                f"⚡ Vednix Engine unreachable — answered by **{label}** instead.\n\n"
                             )
                             yield self.last_handoff
                     yield chunk
@@ -581,7 +583,7 @@ class ResilientLLM:
                 errors.append(f"{label}: {exc}")
                 continue
         raise OllamaError(
-            "No AI provider is reachable. Start Ollama (ollama serve) or add a "
+            "No AI provider is reachable. Start the Vednix Engine (ollama serve) or add a "
             "cloud key in Settings → AI Providers. (" + "; ".join(errors)[:240] + ")"
         )
 

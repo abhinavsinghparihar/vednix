@@ -183,12 +183,8 @@ class PriorityIn(BaseModel):
 # --- REST: onboarding (Phase 7) --------------------------------------------------
 
 class ModeChoiceIn(BaseModel):
-    mode: Literal["free", "cloud", "demo", "guest"]
+    mode: Literal["free", "cloud"]
 
 
 class OllamaDefaultModelIn(BaseModel):
     model: str = Field(min_length=1, max_length=120)
-
-
-class DemoToggleIn(BaseModel):
-    active: bool

@@ -1,13 +1,14 @@
-"""Onboarding routes — first-run state, mode choice, demo gate, and static
-product data the wizard shows (recommended local models with honest
-RAM/disk/speed/quality figures — the user's hardware does the choosing)."""
+"""Onboarding routes — first-run state, mode choice (NO SIGNUP, NO ENTRY:
+only free / cloud), and static product data the wizard shows (recommended
+local models with honest RAM/disk/speed/quality figures — the user's
+hardware does the choosing)."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
 from api.deps import get_core, get_memory, get_onboarding, get_users
-from api.schemas import DemoToggleIn, ModeChoiceIn
+from api.schemas import ModeChoiceIn
 from services.onboarding import OnboardingService
 
 router = APIRouter(tags=["onboarding"])
@@ -46,7 +47,7 @@ async def status(onboarding: OnboardingService = Depends(get_onboarding),
     """Everything the wizard and the route guard need in ONE call."""
     state = await onboarding.status()
     ollama_running = await core.llm.is_available()
-    active = getattr(core.llm, "active_label", "Ollama")
+    active = getattr(core.llm, "active_label", "Vednix Engine")
     return {
         **state,
         "auth_enabled": await users.auth_enabled(),
@@ -66,19 +67,14 @@ async def complete(onboarding: OnboardingService = Depends(get_onboarding)) -> d
     return await onboarding.complete()
 
 
-@router.post("/demo")
-async def demo(body: DemoToggleIn,
-               onboarding: OnboardingService = Depends(get_onboarding)) -> dict:
-    return await onboarding.reset_demo(body.active)
-
-
 @router.get("/local-models")
 async def local_models() -> dict:
     return {"models": RECOMMENDED_MODELS}
 
 
-@router.post("/guest/clear")
-async def guest_clear(memory=Depends(get_memory)) -> dict:
-    """'History (temporary)' made literal — one button, everything the guest
-    typed and every long-term memory, gone. Files/KB survive by design."""
+@router.post("/wipe-data")
+async def wipe_data(memory=Depends(get_memory)) -> dict:
+    """One button, everything the local user typed — every conversation and
+    long-term memory — gone. Files/KB survive by design (they were added
+    file-by-file, on purpose)."""
     return await memory.wipe_chats_and_memories()

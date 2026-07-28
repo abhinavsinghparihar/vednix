@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.logging import get_logger
@@ -297,3 +297,72 @@ class UserService:
                 update(AuthSession).where(AuthSession.user_id == user_id).values(revoked=True)
             )
             await db.commit()
+
+    # --- admin console (owner-only, Phase 8) ---------------------------------------
+
+    async def admin_list_users(self) -> list[dict]:
+        """Every account with its live-session count — the owner console table."""
+        now = datetime.now(timezone.utc)
+        async with self._sessions() as db:
+            users = (await db.execute(select(User).order_by(User.created_at))).scalars().all()
+            sessions = (await db.execute(
+                select(AuthSession).where(AuthSession.revoked.is_(False))
+            )).scalars().all()
+            live: dict[str, int] = {}
+            for s in sessions:
+                if _aware(s.expires_at) > now:
+                    live[s.user_id] = live.get(s.user_id, 0) + 1
+            return [
+                {
+                    "id": u.id, "username": u.username, "display_name": u.display_name,
+                    "email": u.email, "role": u.role, "theme": u.theme, "language": u.language,
+                    "created_at": u.created_at.isoformat() if u.created_at else None,
+                    "live_sessions": live.get(u.id, 0),
+                }
+                for u in users
+            ]
+
+    async def admin_reset_password(self, user_id: str, new_password: str) -> bool:
+        """Owner sets a user's password directly; every session of that user dies."""
+        if len(new_password) < 8:
+            raise ValueError("Password must be at least 8 characters.")
+        async with self._sessions() as db:
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user is None:
+                return False
+            user.password_hash = hash_password(new_password)
+            await db.execute(
+                update(AuthSession).where(AuthSession.user_id == user_id).values(revoked=True)
+            )
+            await db.commit()
+            logger.info("admin reset password for %s (sessions revoked)", user.username)
+            return True
+
+    async def admin_revoke_sessions(self, user_id: str) -> int:
+        async with self._sessions() as db:
+            res = await db.execute(
+                update(AuthSession).where(AuthSession.user_id == user_id).values(revoked=True)
+            )
+            await db.commit()
+            return res.rowcount or 0
+
+    async def admin_delete_user(self, user_id: str) -> None:
+        """Delete an account + its sessions. The LAST owner is immortal —
+        deleting them would brick the machine's entry door (no signup no entry)."""
+        async with self._sessions() as db:
+            user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+            if user is None:
+                raise LookupError("User not found.")
+            if user.role == "owner":
+                owners = (await db.execute(
+                    select(func.count()).select_from(User).where(User.role == "owner")
+                )).scalar_one()
+                if owners <= 1:
+                    raise PermissionError(
+                        "The last owner can't be deleted — make another owner first."
+                    )
+            await db.execute(delete(AuthSession).where(AuthSession.user_id == user_id))
+            await db.delete(user)
+            await db.commit()
+            self._count_cache = None  # keep the middleware lock fast-path honest
+            logger.info("admin deleted user %s", user.username)

@@ -291,7 +291,7 @@ async def test_router_fails_over_with_visible_handoff(db, settings):
 
     router = ResilientLLM(FakeLLM(offline=True), service, settings)
     chunks = [chunk async for chunk in router.chat_stream([{"role": "user", "content": "hi"}], 0.5)]
-    assert chunks[0].startswith("⚡ Ollama unreachable — answered by **Google Gemini**")
+    assert chunks[0].startswith("⚡ Vednix Engine unreachable — answered by **Google Gemini**")
     assert "".join(chunks[1:]) == "cloud answer"
     assert router.active_label == "Google Gemini"
 
@@ -309,44 +309,32 @@ async def test_router_all_providers_down_gives_actionable_error(db, settings):
 
 
 # =============================================================================
-# onboarding + demo gate
+# onboarding — mode choice (no-signup-no-entry)
 # =============================================================================
 
-def test_onboarding_demo_gate_blocks_chat_without_persisting(settings):
-    """NOTE on shape: ONE websocket per test — starlette's sync TestClient
-    occasionally wedges closing a second ws on one portal; scenario splits are
-    the stable pattern used by every ws test in this suite."""
+def test_retired_modes_are_rejected(settings):
+    """NO SIGNUP, NO ENTRY (Phase 8): guest and demo are retired — only free
+    and cloud remain valid modes; anything else dies at the schema door."""
     with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
         status = client.get("/api/onboarding/status").json()
-        assert status["setup_complete"] is False and status["demo_active"] is False
+        assert status["setup_complete"] is False
         assert status["auth_enabled"] is False
         assert status["active_provider"]  # router label present
+        assert "demo_active" not in status  # gate retired, not merely hidden
 
-        choice = client.post("/api/onboarding/mode", json={"mode": "demo"}).json()
-        assert choice["demo_active"] is True and choice["mode"] == "demo"
-        # demo IS a completed first-run choice: the workspace shell must open
-        # for the tour while the engine stays gated. (Leaving setup incomplete
-        # here made /chat redirect straight back to /onboarding — a dead loop.)
-        assert client.get("/api/onboarding/status").json()["setup_complete"] is True
+        for retired in ("guest", "demo"):
+            resp = client.post("/api/onboarding/mode", json={"mode": retired})
+            assert resp.status_code == 422, retired
 
-        # demo gate: chat burns nothing and explains why
-        with client.websocket_connect("/ws/chat") as ws:
-            ws.send_text('{"type":"user_message","content":"hello demo"}')
-            frame = ws.receive_json()
-            assert frame["type"] == "error" and frame["code"] == "demo_mode"
-        # demo chats pollute nothing: zero conversations persisted
-        assert len(client.get("/api/conversations").json()) == 0
-
-        # exiting the tour = picking a real mode (the "Connect AI" CTA path):
-        # one call atomically clears the gate and arms the engine
-        out = client.post("/api/onboarding/mode", json={"mode": "free"}).json()
-        assert out["demo_active"] is False and out["setup_complete"] is True
+        # the real modes still complete first-run cleanly
+        choice = client.post("/api/onboarding/mode", json={"mode": "free"}).json()
+        assert choice["mode"] == "free" and choice["setup_complete"] is True
 
 
 def test_onboarding_free_mode_completes_setup_and_rearms_engine(settings):
     with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
         done = client.post("/api/onboarding/mode", json={"mode": "free"}).json()
-        assert done["demo_active"] is False and done["setup_complete"] is True
+        assert done["mode"] == "free" and done["setup_complete"] is True
         with client.websocket_connect("/ws/chat") as ws:
             ws.send_text('{"type":"user_message","content":"hello after setup"}')
             # brand-new conversation: created frame lands before the generation
@@ -400,27 +388,14 @@ async def test_refresh_rotation_and_get_user_by_session(db, settings):
 
 
 # =============================================================================
-# Phase 7b — guest mode, system status, ollama default model
+# Phase 7b/8 — data wipe, system status, ollama default model
 # =============================================================================
 
-def test_guest_mode_chats_for_real(settings):
+def test_wipe_data_erases_chats_and_memories(settings):
+    """The privacy wipe survived the guest retirement — every signed-in user
+    gets the same one-button local amnesia."""
     with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
-        done = client.post("/api/onboarding/mode", json={"mode": "guest"}).json()
-        assert done["mode"] == "guest" and done["demo_active"] is False
-        assert done["setup_complete"] is True  # first-run completes for guests too
-        with client.websocket_connect("/ws/chat") as ws:
-            ws.send_text('{"type":"user_message","content":"guest hello"}')
-            assert ws.receive_json()["type"] == "conversation_created"
-            assert ws.receive_json()["type"] == "message_started"
-            for _ in range(12):
-                if ws.receive_json()["type"] == "message_done":
-                    break
-        assert len(client.get("/api/conversations").json()) == 1
-
-
-def test_guest_clear_wipes_chats_and_memories(settings):
-    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
-        remember = client.post("/api/memory", json={"content": "guest likes chai"})
+        remember = client.post("/api/memory", json={"content": "vednix likes chai"})
         assert remember.status_code in (200, 201)
         with client.websocket_connect("/ws/chat") as ws:
             ws.send_text('{"type":"user_message","content":"temp history"}')
@@ -429,7 +404,8 @@ def test_guest_clear_wipes_chats_and_memories(settings):
             for _ in range(12):
                 if ws.receive_json()["type"] == "message_done":
                     break
-        wiped = client.post("/api/onboarding/guest/clear").json()
+        assert len(client.get("/api/conversations").json()) == 1
+        wiped = client.post("/api/onboarding/wipe-data").json()
         assert wiped["conversations_deleted"] >= 1 and wiped["memories_deleted"] >= 1
         assert len(client.get("/api/conversations").json()) == 0
         assert client.get("/api/memory").json() in ({}, [], {"memory": [], "items": []}) or \
