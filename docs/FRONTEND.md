@@ -213,3 +213,55 @@ persists nothing; picking any real mode clears the gate atomically (chat's
 "Connect AI" CTAs land on /onboarding). guest = real local chat, temporary
 history (profile ⋮ wipe). Deep links: /chat?view=dash|chat|knowledge|memory.
 Ribbons in the chat view mirror the active mode.
+
+## Phase 8 — NO SIGNUP NO ENTRY, admin console & the Neural-V brand (shipped)
+
+```
+app/login/page.tsx          THE gate — account only. Quick-CTA strip deleted;
+                            docstring states the law: "no account, no workspace".
+app/chat/page.tsx           guard is now session !== "authed" → /login?next=/chat;
+                            demo ribbon, guest ribbon and the resting-composer card
+                            are deleted — the composer is simply always the composer.
+app/onboarding/page.tsx     MODES = free · cloud (only). The done stage routes to
+                            /chat when auth is off, else /signup ("Create your account").
+components/onboarding/      OllamaWizard keeps a single honest attribution line —
+                            "built on the open Ollama runtime"; everything else
+                            says Vednix Engine.
+app/profile/page.tsx        guest variant deleted entirely (authed-only tree);
+                            the data section keeps "wipe this device" (now /wipe-data).
+app/settings/page.tsx       12 tabs: the Ollama tab is now "Engine" (id `engine`);
+                            NEW "Admin" tab — rendered only when me.role === "owner".
+                            AdminPanel: users table (monogram · role chip · live
+                            sessions), inline password reset, per-user sign-out,
+                            remove with inline confirm; the last owner shows
+                            "immortal" and refuses removal honestly.
+lib/useGuard.ts             the law, restated: backend down → allow (banner) ·
+                            setup incomplete → /onboarding · !authed anywhere
+                            except /login /signup /onboarding → /login?next=…
+store/auth.ts               SessionState "guest" is now "anon" — a locked-world
+                            no-account visitor, redirected, never roaming.
+```
+
+### The brand layer
+
+- `components/brand/LogoMark.tsx` — the **Neural V**: three glowing gold nodes
+  on a V constellation with two energy pulses riding the synapses. Hand-coded
+  SMIL animation (zero JS, server-safe), mounted through the single choke
+  point `Wordmark` (landing nav · footer · auth shell · boot gate ·
+  onboarding · sidebar · loading) plus the workspace `Rail` tile. The logo is
+  in motion everywhere it appears.
+- `components/brand/Signature.tsx` — `TricolorSignatureText`: "Made" in
+  saffron, "by" in cream, "Abhinav Singh" in India green — used at every
+  signature placement (16 surfaces + the vertical rail strip).
+- String scrub: the UI never says "offline" or "Ollama" as a brand anymore —
+  Engine / Vednix Engine / "your machine". Internal identifiers (`"ollama"`
+  provider id, `ollama pull` commands) stay real by design.
+
+### One-click launcher (scripts/launch.py + start.bat / start.sh)
+
+Eight narrated steps — python check → backend venv+deps → node check →
+frontend install+build → engine auto-install (winget / brew / official
+script) → engine serve + `qwen2.5:3b` pull → backend+frontend start →
+health-wait + browser open. Logs land in `logs/`; Ctrl+C stops everything.
+No third-party Python deps — stdlib only, so it runs anywhere 3.11+ runs.
+

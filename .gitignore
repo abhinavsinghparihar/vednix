@@ -34,3 +34,4 @@ Thumbs.db
 
 # build artifacts
 *.tsbuildinfo
+logs/

@@ -151,16 +151,51 @@ GET|PUT /api/providers/ollama/default-model      engine-wide default, hot-applie
 
 ## Onboarding & system (Phase 7)
 
-```
-GET    /api/onboarding/status    setup_complete, mode, demo_active, auth_enabled,
-                                 ollama_running, active_provider label
-POST   /api/onboarding/mode      {mode: free|cloud|guest|demo} — every choice completes
-                                 setup; demo flips demo_active (WS gate, zero persistence)
-POST   /api/onboarding/demo      {active} direct gate control · POST /api/onboarding/complete
-GET    /api/onboarding/local-models  recommended Ollama models w/ RAM·disk·speed specs
-POST   /api/onboarding/guest/clear   wipe conversations+memories (temporary history, literal)
-GET    /api/system/status        db/upload bytes, row counts, cpu cores+load, ollama ps VRAM
+(superseded by Phase 8 below — guest/demo modes, `/onboarding/demo` and
+`demo_active` are gone; `guest/clear` is now `/api/onboarding/wipe-data`;
+`/api/system/status` is unchanged.)
+
+Machine-local password recovery (no SMTP by design): `python scripts/reset_password.py`
+on the machine — prompts for the account, revokes every session, sets a new one.
+
+## Phase 8 — NO SIGNUP NO ENTRY, admin console & the Vednix Engine brand
+
+Guest/demo are dead. `POST /api/onboarding/mode` now accepts only
+`free | cloud` (anything else ⇒ 422); `/api/onboarding/demo` is removed;
+`demo_active` no longer exists in `/api/onboarding/status` (its
+`active_provider` fallback label is **"Vednix Engine"** — the Ollama runtime
+is branded, not advertised). The demo WS gate in `/ws/chat` is gone.
+`POST /api/onboarding/guest/clear` → **`POST /api/onboarding/wipe-data`**
+(erases this install's conversations + memories; never touches accounts).
+
+```python
+VALID_MODES = {"free", "cloud"}        # services/onboarding.py
+ENGINE_LABEL = "Vednix Engine"         # services/providers.py — registry label,
+                                       # handoff line, unreachable-error copy
 ```
 
-Offline password recovery (no SMTP by design): `python scripts/reset_password.py`
-on the machine — prompts for the account, revokes every session, sets a new one.
+Priority failover handoff now reads `⚡ Vednix Engine unreachable — answered
+by <cloud> instead.` and the engine-down guidance says
+`Start the Vednix Engine (ollama serve)`. Commands stay real (`ollama pull`…)
+— only the UI-visible brand changed.
+
+### Owner admin console
+
+First account = owner; more owners can exist but the **last owner is
+immortal** (cannot be deleted or demoted out of existence — service raises
+`PermissionError`, API maps it to 400). Every route requires an access JWT
+whose claim `role == "owner"`; members get 403, anonymous 401. An owner
+cannot delete their own account here (400) — use profile. Owner actions
+touch every session via token-family revocation, so a reset/removed user is
+signed out everywhere instantly.
+
+```
+GET    /api/admin/users                        rows: id, username, display_name,
+                                               role, created, live_sessions
+POST   /api/admin/users/{id}/password          {password} — force-reset, revokes all sessions
+POST   /api/admin/users/{id}/revoke-sessions   sign the user out of every device
+DELETE /api/admin/users/{id}                   remove member (self/last-owner ⇒ 400)
+```
+
+Machine-local password recovery (`scripts/reset_password.py`) is unchanged —
+it runs on the box, no SMTP needed by design.
