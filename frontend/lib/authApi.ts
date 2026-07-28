@@ -34,8 +34,7 @@ export interface SessionInfo {
 
 export interface OnboardingStatus {
   setup_complete: boolean;
-  mode: "free" | "cloud" | "demo" | "guest" | null;
-  demo_active: boolean;
+  mode: "free" | "cloud" | null;
   auth_enabled: boolean;
   ollama_running: boolean;
   active_provider: string;
@@ -160,14 +159,12 @@ export const authApi = {
 
 export const onboardingApi = {
   status: () => apiFetch<OnboardingStatus>("/api/onboarding/status", {}, { retryOn401: false }),
-  chooseMode: (mode: "free" | "cloud" | "guest" | "demo") =>
+  chooseMode: (mode: "free" | "cloud") =>
     apiFetch<OnboardingStatus>("/api/onboarding/mode", { method: "POST", body: JSON.stringify({ mode }) }),
-  setDemo: (active: boolean) =>
-    apiFetch<OnboardingStatus>("/api/onboarding/demo", { method: "POST", body: JSON.stringify({ active }) }),
   localModels: () => apiFetch<{ models: LocalModelRec[] }>("/api/onboarding/local-models"),
-  guestClear: () =>
+  wipeData: () =>
     apiFetch<{ conversations_deleted: number; memories_deleted: number }>(
-      "/api/onboarding/guest/clear", { method: "POST" },
+      "/api/onboarding/wipe-data", { method: "POST" },
     ),
 };
 
@@ -179,6 +176,30 @@ export const systemApi = {
       method: "PUT",
       body: JSON.stringify({ model }),
     }),
+};
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  display_name: string;
+  email: string | null;
+  role: "owner" | "member";
+  theme: string;
+  language: string;
+  created_at: string | null;
+  live_sessions: number;
+}
+
+export const adminApi = {
+  users: () => apiFetch<{ users: AdminUser[] }>("/api/admin/users"),
+  resetPassword: (id: string, password: string) =>
+    apiFetch<{ ok: boolean }>(`/api/admin/users/${id}/password`, {
+      method: "POST", body: JSON.stringify({ password }),
+    }),
+  revokeSessions: (id: string) =>
+    apiFetch<{ revoked: number }>(`/api/admin/users/${id}/revoke-sessions`, { method: "POST" }),
+  deleteUser: (id: string) =>
+    apiFetch<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
 };
 
 export const providerApi = {

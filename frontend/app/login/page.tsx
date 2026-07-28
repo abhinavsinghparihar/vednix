@@ -1,8 +1,8 @@
 /**
  * /login — the OS lock screen, cinematic edition. Email-or-username +
  * password, remember-me, animated validation and errors, forgot-password
- * recovery (honest local recovery — SMTP can't exist offline), and the three
- * no-account on-ramps: Guest, Ollama, API Key.
+ * recovery (honest local recovery — a machine-only app can't promise SMTP).
+ * Rule of the house: NO SIGNUP, NO ENTRY — this screen is the only door.
  *
  * Keyboard: Enter/⌘↵ submits; Esc exits the forgot view.
  */
@@ -12,22 +12,14 @@
 import { Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { motion } from "framer-motion";
-import { Cloud, Cpu, TerminalSquare, UserRound, Copy, Check, ArrowLeft, ArrowUpRight } from "lucide-react";
+import { TerminalSquare, Copy, Check, ArrowLeft } from "lucide-react";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { AuthCheck, AuthError, AuthField, AuthSubmit, PasswordField } from "@/components/auth/fields";
 import { authApi, onboardingApi } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
 import { useAuth } from "@/store/auth";
-import { cn } from "@/lib/utils";
 
 type View = "login" | "forgot";
-
-const QUICK = [
-  { id: "guest", label: "Continue as Guest", note: "No account — local Ollama chat, temporary history", icon: UserRound },
-  { id: "free", label: "Continue with Ollama", note: "Free · offline · private", icon: Cpu },
-  { id: "cloud", label: "Continue with API Key", note: "Fastest cloud models", icon: Cloud },
-] as const;
 
 function LoginInner() {
   const router = useRouter();
@@ -83,18 +75,6 @@ function LoginInner() {
     }
   };
 
-  const quickStart = async (mode: "guest" | "free" | "cloud") => {
-    setLoading(true);
-    setError(null);
-    try {
-      await onboardingApi.chooseMode(mode);
-      router.replace(mode === "guest" ? "/chat" : "/onboarding");
-    } catch (err) {
-      fail(err instanceof ApiError ? err.message : "Backend unreachable — is Vednix running?");
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && view === "forgot") setView("login");
@@ -138,8 +118,8 @@ function LoginInner() {
             </div>
           </div>
           <p>
-            Email-based reset isn't offered because an offline-first app can't
-            promise SMTP. If you run Vednix behind a mail relay later, this
+            Email-based reset isn't offered because an app that lives wholly on
+            this machine can't promise SMTP. If you run Vednix behind a mail relay later, this
             screen grows a real email flow off the same seam.
           </p>
         </div>
@@ -196,37 +176,6 @@ function LoginInner() {
           Create an account
         </Link>
       </p>
-
-      <div className="my-5 flex items-center gap-3">
-        <span className="h-px flex-1 bg-white/[0.07]" />
-        <span className="font-mono text-[9px] uppercase tracking-[0.25em] text-faint">or skip the account</span>
-        <span className="h-px flex-1 bg-white/[0.07]" />
-      </div>
-
-      <div className="space-y-2">
-        {QUICK.map((q) => (
-          <motion.button
-            key={q.id}
-            onClick={() => void quickStart(q.id)}
-            disabled={loading}
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.985 }}
-            className={cn(
-              "glass group flex w-full items-center gap-3.5 rounded-xl px-4 py-3 text-left",
-              "transition-colors duration-200 hover:border-gold/30 hover:bg-gold/[0.04]",
-            )}
-          >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gold/25 bg-gold/[0.08] text-gold">
-              <q.icon className="h-4 w-4" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold text-cream">{q.label}</span>
-              <span className="block truncate text-[11px] text-faint">{q.note}</span>
-            </span>
-            <ArrowUpRight className="h-4 w-4 shrink-0 text-faint transition-all duration-200 group-hover:translate-x-0.5 group-hover:text-gold-bright" />
-          </motion.button>
-        ))}
-      </div>
 
       <p className="mt-5 text-center font-mono text-[9px] uppercase tracking-[0.22em] text-faint/70">
         Enter submits · ⌘↵ anywhere

@@ -1,9 +1,9 @@
 /**
  * /profile — who you are on this machine: avatar monogram, username, email,
  * membership (owner/member), the AI provider & local model currently live,
- * honest machine stats (db/uploads bytes, counts, CPU, Ollama VRAM residency),
+ * honest machine stats (db/uploads bytes, counts, CPU, Engine VRAM residency),
  * signed-in devices with revoke, password change, and sign-out.
- * Guest (no account) sees a slim account-upsell plus the data-wipe card.
+ * No signup, no entry — this page only exists behind a session.
  */
 
 "use client";
@@ -17,7 +17,7 @@ import {
   MonitorSmartphone, ShieldCheck, Trash2, XCircle,
 } from "lucide-react";
 import {
-  authApi, onboardingApi, systemApi, type SessionInfo, type SystemStatus,
+  authApi, systemApi, type SessionInfo, type SystemStatus,
 } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
 import { useAuth } from "@/store/auth";
@@ -76,7 +76,6 @@ function ProfileInner() {
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [pwState, setPwState] = useState<"idle" | "busy" | "ok" | "err">("idle");
   const [pwError, setPwError] = useState<string | null>(null);
-  const [wipeState, setWipeState] = useState<"idle" | "busy" | "ok">("idle");
   const [signingOut, setSigningOut] = useState(false);
 
   const load = useCallback(async () => {
@@ -119,17 +118,6 @@ function ProfileInner() {
     } catch { /* keep list */ }
   };
 
-  const wipeGuest = async () => {
-    setWipeState("busy");
-    try {
-      await onboardingApi.guestClear();
-      setWipeState("ok");
-      await load();
-    } catch {
-      setWipeState("idle");
-    }
-  };
-
   const doSignOut = async () => {
     setSigningOut(true);
     await signOut();
@@ -137,8 +125,6 @@ function ProfileInner() {
   };
 
   const counts = sys?.counts;
-  const guest = !user;
-
   return (
     <main className="relative min-h-dvh overflow-hidden bg-void text-cream">
       <NeuralBackground />
@@ -157,38 +143,36 @@ function ProfileInner() {
           transition={{ duration: 0.6, ease: EASE_CURVE }}
         >
           <span className="flex h-20 w-20 items-center justify-center rounded-3xl border border-gold/40 bg-gradient-to-br from-gold/25 to-ember/10 font-display text-3xl font-extrabold text-gold-bright shadow-glow-gold">
-            {(user?.display_name ?? "G").slice(0, 1).toUpperCase()}
+            {(user?.display_name ?? "V").slice(0, 1).toUpperCase()}
           </span>
           <div className="min-w-0">
             <h1 className="truncate font-display text-3xl font-extrabold tracking-tight text-cream">
-              {user?.display_name ?? "Guest"}
+              {user?.display_name ?? "…"}
             </h1>
             <p className="text-sm text-muted">
-              {user ? `@${user.username}${user.email ? ` · ${user.email}` : ""}` : "No account on this machine — yet"}
+              {user ? `@${user.username}${user.email ? ` · ${user.email}` : ""}` : "Loading your identity…"}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <span className={cn(
                 "rounded-md px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em]",
                 user?.role === "owner" ? "bg-gold/20 text-gold-bright" : "bg-white/[0.06] text-muted",
               )}>
-                {user ? (user.role === "owner" ? "Owner membership" : "Member") : onboarding?.mode === "guest" ? "Guest session" : "Open machine"}
+                {user ? (user.role === "owner" ? "Owner membership" : "Member") : "…"}
               </span>
               <span className="rounded-md bg-white/[0.06] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted">
-                {sys?.active_provider ?? onboarding?.active_provider ?? "Ollama"}
+                {sys?.active_provider ?? onboarding?.active_provider ?? "Vednix Engine"}
               </span>
               <span className="rounded-md bg-white/[0.06] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted">
                 model · {sys?.default_model ?? "—"}
               </span>
             </div>
           </div>
-          {!guest && (
-            <div className="ml-auto">
-              <Button variant="subtle" onClick={() => void doSignOut()} disabled={signingOut}>
-                {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
-                Sign out
-              </Button>
-            </div>
-          )}
+          <div className="ml-auto">
+            <Button variant="subtle" onClick={() => void doSignOut()} disabled={signingOut}>
+              {signingOut ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOut className="h-4 w-4" />}
+              Sign out
+            </Button>
+          </div>
         </motion.header>
 
         {/* --- machine stats ------------------------------------------------- */}
@@ -221,30 +205,13 @@ function ProfileInner() {
               ))}
               {sys && !sys.ollama.running && (
                 <span className="flex items-center gap-2 text-[12px] text-faint">
-                  <XCircle className="h-3.5 w-3.5 text-[#f0746e]" /> Ollama offline — no local models loaded
+                  <XCircle className="h-3.5 w-3.5 text-[#f0746e]" /> Engine stopped — no local models loaded
                 </span>
               )}
             </div>
           </Section>
 
-          {guest ? (
-            <Section title="Guest data" icon={Trash2} delay={0.25}>
-              <p className="mb-3 text-[13px] leading-relaxed text-muted">
-                Guest history is temporary by design. One click wipes every
-                conversation and memory — files you uploaded stay (clear those
-                from the Knowledge view).
-              </p>
-              <Button variant={wipeState === "ok" ? "subtle" : "danger"} onClick={() => void wipeGuest()} disabled={wipeState !== "idle"}>
-                {wipeState === "busy" ? <Loader2 className="h-4 w-4 animate-spin" /> :
-                  wipeState === "ok" ? <CheckCircle2 className="h-4 w-4 text-emerald-400" /> : <Trash2 className="h-4 w-4" />}
-                {wipeState === "ok" ? "Wiped" : "Wipe my temporary data"}
-              </Button>
-              <p className="mt-4 text-[12px] text-faint">
-                Want history that survives restarts + a locked workspace?{" "}
-                <Link href="/signup" className="text-gold-bright hover:underline">Create an account</Link>
-              </p>
-            </Section>
-          ) : (
+          {(
             <>
               <Section title="Devices" icon={MonitorSmartphone} delay={0.25}>
                 {sessions.length === 0 ? (
@@ -310,8 +277,8 @@ function ProfileInner() {
 }
 
 export default function ProfilePage() {
-  // protected: once accounts exist, /profile requires a session (guests are
-  // rerouted to /login). On an open machine (zero accounts) the guest panel shows.
+  // no signup, no entry: anonymous visitors — with OR without accounts on the
+  // machine — are rerouted to /login by the single routing law.
   const state = useRouteGuard({ requireAuth: true });
   if (state === "loading") {
     return (

@@ -1,7 +1,7 @@
 /**
  * /onboarding — the first-run ceremony. Four movements:
  *   welcome   → the manifesto (Create. Research. Code. Think.)
- *   mode      → how do you want to run AI? (Local free · Cloud keys · Guest · demo link)
+ *   mode      → how do you want to run AI? (Vednix Engine free · Cloud keys)
  *   flow      → OllamaWizard | CloudWizard
  *   done      → AI Ready → Launch Workspace
  *
@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Cloud, Cpu, Loader2, Rocket, UserRound, Eye, ArrowRight } from "lucide-react";
+import { Cloud, Cpu, Loader2, Rocket, ArrowRight } from "lucide-react";
 import { WizardShell, StepTitle } from "@/components/onboarding/shared";
 import { OllamaWizard } from "@/components/onboarding/OllamaWizard";
 import { CloudWizard } from "@/components/onboarding/CloudWizard";
@@ -30,16 +30,12 @@ const VERBS = ["Create.", "Research.", "Code.", "Think."];
 
 const MODES = [
   {
-    id: "free" as const, icon: Cpu, title: "Free · Offline · Unlimited", tag: "RECOMMENDED",
-    lines: ["100% private — nothing leaves this machine", "Powered by Ollama", "Guided 3-minute setup"],
+    id: "free" as const, icon: Cpu, title: "Free · Private · Unlimited", tag: "RECOMMENDED",
+    lines: ["100% private — nothing leaves this machine", "Powered by the Vednix Engine", "Guided 3-minute setup"],
   },
   {
     id: "cloud" as const, icon: Cloud, title: "Cloud AI", tag: null,
     lines: ["Fastest models on earth", "Works anywhere, even weak hardware", "Requires an API key (guided)"],
-  },
-  {
-    id: "guest" as const, icon: UserRound, title: "Continue as Guest", tag: null,
-    lines: ["No account, no setup walls", "Chat on local Ollama", "Temporary history — clear anytime"],
   },
 ];
 
@@ -55,7 +51,7 @@ export default function OnboardingPage() {
     void onboardingApi.status().then(setStatus).catch(() => setStatus(null));
   }, []);
 
-  const pick = useCallback(async (mode: "free" | "cloud" | "guest" | "demo") => {
+  const pick = useCallback(async (mode: "free" | "cloud") => {
     setBusyMode(mode);
     setError(null);
     try {
@@ -66,10 +62,6 @@ export default function OnboardingPage() {
       } else if (mode === "cloud") {
         setFlow("cloud");
         setStage("wizard");
-      } else if (mode === "demo") {
-        router.replace("/chat");
-      } else {
-        router.replace("/chat");
       }
     } catch {
       setError("Backend unreachable — start Vednix's backend and retry.");
@@ -170,19 +162,6 @@ export default function OnboardingPage() {
               </motion.button>
             ))}
           </div>
-          <motion.p
-            className="mt-6 text-center"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }}
-          >
-            <button
-              onClick={() => void pick("demo")}
-              disabled={busyMode !== null}
-              className="inline-flex items-center gap-2 text-[12px] text-faint transition-colors hover:text-gold-bright"
-            >
-              <Eye className="h-3.5 w-3.5" />
-              Just exploring? Take the no-AI demo tour instead
-            </button>
-          </motion.p>
         </div>
       )}
 
@@ -230,10 +209,13 @@ export default function OnboardingPage() {
               className="h-12 rounded-2xl px-8 text-base"
               onClick={() => {
                 void onboardingApi.status().catch(() => status);
-                router.replace("/chat");
+                // NO SIGNUP, NO ENTRY: the workspace only opens to an account —
+                // zero-account machines finish the ceremony at the signup door
+                router.replace(status?.auth_enabled ? "/chat" : "/signup");
               }}
             >
-              <Rocket className="h-4 w-4" /> Launch Workspace
+              <Rocket className="h-4 w-4" />
+              {status?.auth_enabled ? "Launch Workspace" : "Create your account"}
             </Button>
           </motion.div>
         </div>

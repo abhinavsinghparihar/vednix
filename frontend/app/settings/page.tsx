@@ -7,7 +7,7 @@
  *   Language     — default reply language (account pref; guests: local)
  *   Voice        — speak replies + speed + test (shared chat store state)
  *   AI Models    — default model per the ACTIVE provider (live-applied)
- *   Ollama       — connection, installed models, pull guides, specs
+ *   Engine       — connection, installed models, pull guides, specs
  *   API Keys     — the provider manager: add/verify/toggle/remove/priority
  *   Memory       — counts, open view, context budget note
  *   Privacy      — local-first explainer + destructive actions
@@ -23,11 +23,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowDown, ArrowLeft, ArrowUp, Bot, CheckCircle2, ChevronDown, Cloud, Cpu, Database,
   FlaskConical, Globe, HardDrive, Info, KeyRound, Languages, Loader2, MemoryStick,
-  Mic, Palette, RefreshCw, Settings2, ShieldCheck, Sparkles, Trash2, Volume2,
+  Mic, MonitorSmartphone, Palette, RefreshCw, Settings2, ShieldCheck, Sparkles, Trash2, Users, Volume2,
 } from "lucide-react";
 import {
-  authApi, onboardingApi, providerApi, systemApi,
-  type OnboardingStatus, type ProviderCatalogItem, type ProviderConfig, type SystemStatus,
+  adminApi, authApi, onboardingApi, providerApi, systemApi,
+  type AdminUser, type OnboardingStatus, type ProviderCatalogItem, type ProviderConfig, type SystemStatus,
 } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
 import { api } from "@/lib/api";
@@ -42,6 +42,7 @@ import { Button, Segmented, Slider, Switch } from "@/components/ui/primitives";
 import { CopyChip, StatusDot } from "@/components/onboarding/shared";
 import { applyTheme, currentTheme } from "@/lib/theme";
 import { tts } from "@/lib/tts";
+import { PasswordField } from "@/components/auth/fields";
 import { cn, EASE_CURVE } from "@/lib/utils";
 import type { Language } from "@/lib/ws";
 
@@ -53,10 +54,11 @@ const TABS = [
   { id: "language", label: "Language", icon: Languages },
   { id: "voice", label: "Voice", icon: Volume2 },
   { id: "models", label: "AI Models", icon: Bot },
-  { id: "ollama", label: "Ollama", icon: Cpu },
+  { id: "engine", label: "Engine", icon: Cpu },
   { id: "keys", label: "API Keys", icon: KeyRound },
   { id: "memory", label: "Memory", icon: MemoryStick },
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
+  { id: "admin", label: "Admin", icon: Users },
   { id: "experimental", label: "Experimental", icon: FlaskConical },
   { id: "about", label: "About", icon: Info },
 ] as const;
@@ -91,9 +93,10 @@ function Card({ title, children, icon: Icon }: { title: string; children: React.
 /* ------------------------------------------------------------ main page --- */
 
 export default function SettingsPage() {
-  // locked world (accounts exist, no session) → /login?next=/settings; on a
-  // zero-account machine guests roam free — that IS Vednix's open local mode
+  // NO SIGNUP, NO ENTRY → anyone without a session goes to /login?next=/settings
   const guard = useRouteGuard({ requireAuth: true });
+  const me = useAuth((s) => s.user);
+  const tabs = TABS.filter((t) => t.id !== "admin" || me?.role === "owner");
   const [tab, setTab] = useState<TabId>("general");
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
   const [sys, setSys] = useState<SystemStatus | null>(null);
@@ -131,7 +134,7 @@ export default function SettingsPage() {
           <Link href="/chat" className="mb-4 inline-flex items-center gap-2 px-2 text-xs text-faint transition-colors hover:text-gold-bright">
             <ArrowLeft className="h-3.5 w-3.5" /> Workspace
           </Link>
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -150,7 +153,7 @@ export default function SettingsPage() {
 
         {/* mobile tab bar */}
         <div className="fixed inset-x-0 bottom-0 z-30 flex gap-1 overflow-x-auto border-t border-white/[0.06] bg-void/90 p-2 backdrop-blur-lg md:hidden">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -178,10 +181,11 @@ export default function SettingsPage() {
               {tab === "language" && <LanguagePanel />}
               {tab === "voice" && <VoicePanel />}
               {tab === "models" && <ModelsPanel sys={sys} reload={load} />}
-              {tab === "ollama" && <OllamaPanel sys={sys} />}
+              {tab === "engine" && <OllamaPanel sys={sys} />}
               {tab === "keys" && <ApiKeysPanel />}
               {tab === "memory" && <MemoryPanel sys={sys} />}
               {tab === "privacy" && <PrivacyPanel reload={load} />}
+              {tab === "admin" && <AdminPanel />}
               {tab === "experimental" && <ExperimentalPanel />}
               {tab === "about" && <AboutPanel />}
             </div>
@@ -207,7 +211,7 @@ function GeneralPanel({ status, sys, reload }: { status: OnboardingStatus | null
           </span>
           <span className="flex items-center gap-2 text-muted">
             <StatusDot tone={status?.ollama_running ? "ok" : "idle"} />
-            Ollama {status?.ollama_running ? "running" : "offline"}
+            Engine {status?.ollama_running ? "running" : "stopped"}
           </span>
           <span className="text-muted">Provider · <b className="text-cream">{status?.active_provider ?? "—"}</b></span>
           <Button
@@ -224,9 +228,8 @@ function GeneralPanel({ status, sys, reload }: { status: OnboardingStatus | null
       </Card>
       <Card title="Run mode" icon={Sparkles}>
         <p className="mb-3 text-[13px] text-muted">
-          This machine runs in <b className="text-cream">{status?.mode ?? "unset"}</b> mode
-          {status?.demo_active ? " (demo tour — chat locked)" : ""}. Re-run the
-          first-time ceremony anytime:
+          This machine runs in <b className="text-cream">{status?.mode ?? "unset"}</b> mode.
+          Re-run the first-time ceremony anytime:
         </p>
         <div className="flex flex-wrap gap-2">
           <Link href="/onboarding"><Button variant="subtle" size="sm"><Sparkles className="h-3.5 w-3.5" /> Open setup ceremony</Button></Link>
@@ -340,7 +343,7 @@ function VoicePanel() {
   return (
     <Panel>
       <Card title="Speak replies" icon={Volume2}>
-        <Switch checked={voiceReplies} onCheckedChange={setVoiceReplies} label="Read assistant replies aloud (offline OS voices)" />
+        <Switch checked={voiceReplies} onCheckedChange={setVoiceReplies} label="Read assistant replies aloud (on-device OS voices)" />
         <div className="mt-4">
           <Slider
             value={voiceRate} min={0.5} max={2} step={0.05}
@@ -398,7 +401,7 @@ function ModelsPanel({ sys, reload }: { sys: SystemStatus | null; reload: () => 
       await reload();
       setNote(`Default model saved — ${selected} answers from now on.`);
     } catch (err) {
-      setNote(err instanceof ApiError ? `${err.message} (default model applies to Ollama; cloud models are set per provider in API Keys)` : "Could not save.");
+      setNote(err instanceof ApiError ? `${err.message} (default model applies to the Engine; cloud models are set per provider in API Keys)` : "Could not save.");
     } finally {
       setSaving(false);
     }
@@ -409,12 +412,12 @@ function ModelsPanel({ sys, reload }: { sys: SystemStatus | null; reload: () => 
       <Card title="Active provider" icon={Bot}>
         <p className="text-[13px] text-muted">
           <b className="text-cream">{sys?.active_provider ?? "—"}</b> is answering right now.
-          The priority chain lives in <b>API Keys</b> — Ollama first, cloud as fallback.
+          The priority chain lives in <b>API Keys</b> — Engine first, cloud as fallback.
         </p>
       </Card>
       <Card title="Default model" icon={Cpu}>
         {models.length === 0 ? (
-          <p className="text-[12px] text-faint">No models listed — start Ollama or verify a cloud key, then re-check.</p>
+          <p className="text-[12px] text-faint">No models listed — start the Engine or verify a cloud key, then re-check.</p>
         ) : (
           <>
             <div className="relative">
@@ -606,7 +609,7 @@ function ApiKeysPanel() {
         </p>
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="glass flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-gold-bright">
-            1 · Ollama
+            1 · Engine
           </span>
           {priority.filter((id) => rowFor(id)?.enabled && rowFor(id)?.has_key).map((id, i) => (
             <span key={id} className="glass rounded-lg px-2.5 py-1.5 text-[11px] text-muted">{i + 2} · {id}</span>
@@ -723,7 +726,7 @@ function MemoryPanel({ sys }: { sys: SystemStatus | null }) {
       </Card>
       <Card title="Knowledge base" icon={Database}>
         <p className="mb-3 text-[13px] text-muted">
-          Documents are chunked + FTS5-indexed offline and cited into answers.
+          Documents are chunked + FTS5-indexed on-device and cited into answers.
           Manage them in the Knowledge view.
         </p>
         <Link href="/chat?view=knowledge">
@@ -744,7 +747,7 @@ function PrivacyPanel({ reload }: { reload: () => Promise<void> }) {
     setState("busy");
     setDetail(null);
     try {
-      const r = await onboardingApi.guestClear();
+      const r = await onboardingApi.wipeData();
       setDetail(`Wiped ${r.conversations_deleted} conversations and ${r.memories_deleted} memories from this machine.`);
       setState("ok");
       await reload();
@@ -760,9 +763,9 @@ function PrivacyPanel({ reload }: { reload: () => Promise<void> }) {
       <Card title="Local-first, in numbers" icon={ShieldCheck}>
         <ul className="space-y-1.5 text-[12px] leading-relaxed text-muted">
           <li>· <b className="text-cream">0</b> telemetry events, ever — there is no analytics code to disable</li>
-          <li>· Network calls happen only <i>when you make them</i>: Ollama on localhost, plus any cloud provider you personally configure</li>
+          <li>· Network calls happen only <i>when you make them</i>: the Vednix Engine on localhost, plus any cloud provider you personally configure</li>
           <li>· Passwords are PBKDF2 digests; API keys are Fernet-encrypted with a machine-bound secret</li>
-          <li>· The whole app works with Wi-Fi off (cloud providers excluded, obviously)</li>
+          <li>· The whole app keeps answering even when the internet doesn't (cloud providers excluded, obviously)</li>
         </ul>
       </Card>
       <Card title="Danger zone" icon={Trash2}>
@@ -812,7 +815,7 @@ function AboutPanel() {
     <Panel>
       <Card title="Vednix AI" icon={Sparkles}>
         <p className="text-[13px] leading-relaxed text-muted">
-          The AI Operating System — offline-first, multilingual, premium by
+          The AI Operating System — private-first, multilingual, premium by
           default. Next.js 15 + FastAPI + SQLAlchemy + LangGraph research, all
           orchestrated around an 8-state neural core.
         </p>
@@ -830,6 +833,158 @@ function AboutPanel() {
           </p>
         </div>
       </Card>
+    </Panel>
+  );
+}
+
+/* --- Admin (owner console) ------------------------------------------------ */
+
+function AdminPanel() {
+  const me = useAuth((s) => s.user);
+  const [users, setUsers] = useState<AdminUser[] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [resetId, setResetId] = useState<string | null>(null);
+  const [resetPw, setResetPw] = useState("");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      setUsers((await adminApi.users()).users);
+    } catch {
+      setUsers([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const act = async (id: string, fn: () => Promise<unknown>, msg: string) => {
+    setBusy(id);
+    setNotice(null);
+    try {
+      await fn();
+      setNotice(msg);
+      await load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Action failed.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const owners = users?.filter((u) => u.role === "owner").length ?? 0;
+
+  return (
+    <Panel>
+      <Card title="Owner console" icon={Users}>
+        <p className="text-[12px] leading-relaxed text-muted">
+          You own this machine. Every account answers to you — reset a
+          password, sign a user out everywhere, or remove them entirely.
+          The last owner can never be removed (the door would brick itself).
+        </p>
+      </Card>
+
+      {notice && (
+        <p className="glass rounded-xl px-4 py-2.5 text-center text-[12px] text-gold-bright">{notice}</p>
+      )}
+
+      <div className="space-y-3">
+        {(users ?? []).map((u, idx) => {
+          const self = u.id === me?.id;
+          const immortal = u.role === "owner" && owners <= 1;
+          return (
+            <motion.div
+              key={u.id}
+              className="glass-strong rounded-2xl p-5"
+              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: idx * 0.05, duration: 0.35 }}
+            >
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl border border-gold/30 bg-gold/[0.12] font-display text-base font-bold text-gold-bright">
+                  {u.display_name.slice(0, 1).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-semibold text-cream">{u.display_name}</span>
+                    <span className={cn(
+                      "rounded-md px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em]",
+                      u.role === "owner" ? "bg-gold/20 text-gold-bright" : "bg-white/[0.06] text-muted",
+                    )}>
+                      {u.role}
+                    </span>
+                    {self && (
+                      <span className="rounded-md bg-emerald-400/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-emerald-300">
+                        you
+                      </span>
+                    )}
+                  </p>
+                  <p className="mt-0.5 truncate text-[11px] text-faint">
+                    @{u.username}{u.email ? ` · ${u.email}` : ""} · {u.live_sessions} live session{u.live_sessions === 1 ? "" : "s"}
+                  </p>
+                </div>
+                <span className="flex items-center gap-1.5">
+                  <Button variant="subtle" size="sm" disabled={busy === u.id}
+                    onClick={() => { setResetId(resetId === u.id ? null : u.id); setResetPw(""); setConfirmDeleteId(null); }}>
+                    <KeyRound className="h-3.5 w-3.5" /> Reset
+                  </Button>
+                  <Button variant="subtle" size="sm" disabled={busy === u.id}
+                    onClick={() => void act(u.id, () => adminApi.revokeSessions(u.id), `${u.username}: signed out everywhere.`)}>
+                    <MonitorSmartphone className="h-3.5 w-3.5" /> Sign out
+                  </Button>
+                  {self || immortal ? (
+                    <span className="px-2 font-mono text-[9px] uppercase tracking-[0.16em] text-faint" title={self ? "You can't delete yourself" : "The last owner is immortal"}>
+                      {self ? "you" : "last owner"}
+                    </span>
+                  ) : confirmDeleteId === u.id ? (
+                    <>
+                      <Button variant="danger" size="sm" disabled={busy === u.id}
+                        onClick={() => void act(u.id, () => adminApi.deleteUser(u.id), `${u.username}: account removed.`).then(() => setConfirmDeleteId(null))}>
+                        Sure?
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setConfirmDeleteId(null)}>Keep</Button>
+                    </>
+                  ) : (
+                    <Button variant="danger" size="sm" disabled={busy === u.id}
+                      onClick={() => { setConfirmDeleteId(u.id); setResetId(null); }}>
+                      <Trash2 className="h-3.5 w-3.5" /> Remove
+                    </Button>
+                  )}
+                </span>
+              </div>
+
+              {resetId === u.id && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
+                  className="mt-3 flex flex-wrap items-end gap-2 border-t border-white/[0.06] pt-3"
+                >
+                  <div className="min-w-52 flex-1">
+                    <PasswordField
+                      label={`New password for ${u.username} (8+)`}
+                      value={resetPw}
+                      onChange={(e) => setResetPw(e.target.value)}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  <Button
+                    variant="primary" size="sm" className="h-10"
+                    disabled={resetPw.length < 8 || busy === u.id}
+                    onClick={() => void act(u.id, () => adminApi.resetPassword(u.id, resetPw),
+                      `${u.username}: password reset, all devices signed out.`).then(() => { setResetId(null); setResetPw(""); })}
+                  >
+                    {busy === u.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                    Set password
+                  </Button>
+                </motion.div>
+              )}
+            </motion.div>
+          );
+        })}
+        {users && users.length === 0 && (
+          <p className="text-center text-[12px] text-faint">No accounts found.</p>
+        )}
+      </div>
     </Panel>
   );
 }

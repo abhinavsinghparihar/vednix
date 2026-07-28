@@ -2,7 +2,7 @@
  * Auth & entry-state store — ONE place answering three questions:
  *   1. Has this machine finished first-run setup?      (onboarding)
  *   2. Is anyone signed in, must anyone be?            (auth enabled + user)
- *   3. Which run mode is the shell in?                 (free|cloud|guest|demo)
+ *   3. Which run mode is the shell in?                 (free|cloud)
  *
  * Route guards consume `bootstrap()`; pages consume the flags. The access
  * token itself never lives here — it lives in the tokenVault (module memory).
@@ -19,9 +19,10 @@ import {
 } from "@/lib/authApi";
 import { getAccessToken, tryRefresh } from "@/lib/tokenVault";
 
-type SessionState = "unknown" | "guest" | "authed" | "locked";
+type SessionState = "unknown" | "anon" | "authed" | "locked";
 //   unknown : not bootstrapped yet
-//   guest   : no account needed & none signed in (open machine, or guest mode)
+//   anon    : zero accounts on this machine & nobody signed in — treated
+//             like locked for protected routes (NO SIGNUP, NO ENTRY)
 //   authed  : signed in
 //   locked  : accounts exist AND no valid session → route to /login
 
@@ -51,11 +52,11 @@ export const useAuth = create<AuthState>((set, get) => ({
       // backend-offline UI — a wrong redirect would be worse
       set({ checked: true });
       return {
-        setup_complete: true, mode: null, demo_active: false,
-        auth_enabled: false, ollama_running: false, active_provider: "Ollama",
+        setup_complete: true, mode: null,
+        auth_enabled: false, ollama_running: false, active_provider: "Vednix Engine",
       };
     }
-    let session: SessionState = "guest";
+    let session: SessionState = "anon";
     let user: UserOut | null = null;
     if (status.auth_enabled) {
       if (getAccessToken()) {
@@ -88,6 +89,6 @@ export const useAuth = create<AuthState>((set, get) => ({
   signOut: async () => {
     await authApi.logout();
     const authEnabled = get().onboarding?.auth_enabled ?? false;
-    set({ user: null, session: authEnabled ? "locked" : "guest" });
+    set({ user: null, session: authEnabled ? "locked" : "anon" });
   },
 }));

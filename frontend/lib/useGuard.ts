@@ -1,11 +1,13 @@
 /**
- * useRouteGuard — the single routing law of Phase 7:
+ * useRouteGuard — the single routing law of Phase 8:
  *
- *   backend unreachable              → allow (workspace shows offline UI)
+ *   backend unreachable              → allow (workspace shows its offline state)
  *   setup NOT complete               → /onboarding (except when already there)
- *   /profile, /settings without auth → /login?next=… (guest may NOT pass)
- *   accounts exist, no session       → locked → /login (for guarded routes)
- *   everything else                  → allow (guests can roam /chat & /onboarding)
+ *   /profile, /settings, (any page) without a session
+ *                                    → /login?next=… — NO SIGNUP, NO ENTRY:
+ *                                      a zero-account machine ("anon") is treated
+ *                                      exactly like a locked one
+ *   everything else                  → allow (signed-in users roam free)
  *
  * Returns "loading" | "ok" ("loading" also covers in-flight redirects so the
  * page can render a minimal splash instead of flashing protected content).
@@ -29,7 +31,7 @@ export function useRouteGuard(opts: { requireAuth: boolean }): "loading" | "ok" 
       const status = await bootstrap();
       if (!live) return;
       // unreachable backend sentinel (see store/auth.bootstrap)
-      const unreachable = status.active_provider === "Ollama" && !useAuth.getState().onboarding;
+      const unreachable = status.active_provider === "Vednix Engine" && !useAuth.getState().onboarding;
       if (unreachable) {
         setState("ok");
         return;
@@ -39,11 +41,13 @@ export function useRouteGuard(opts: { requireAuth: boolean }): "loading" | "ok" 
         return;
       }
       const { session } = useAuth.getState();
-      if (opts.requireAuth && session === "locked") {
+      const signedIn = session === "authed";
+      if (opts.requireAuth && !signedIn) {
         router.replace(`/login?next=${encodeURIComponent(pathname)}`);
         return;
       }
-      if (session === "locked" && pathname !== "/login" && pathname !== "/signup" && pathname !== "/chat" && pathname !== "/onboarding") {
+      // no-signup-no-entry: anywhere but the door trio, anon/locked → /login
+      if (!signedIn && pathname !== "/login" && pathname !== "/signup" && pathname !== "/onboarding") {
         router.replace("/login");
         return;
       }
