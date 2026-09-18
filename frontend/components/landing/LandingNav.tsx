@@ -11,7 +11,6 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowUpRight, Menu, X } from "lucide-react";
 import { EASE } from "./shared";
-import { Signature } from "@/components/brand/Signature";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { Wordmark } from "@/components/brand/Wordmark";
 
@@ -131,7 +130,6 @@ export function LandingNav() {
               </motion.div>
             </div>
             <div className="flex items-center justify-between px-8 pb-9">
-              <Signature framed />
               <ThemeToggle />
             </div>
           </motion.div>

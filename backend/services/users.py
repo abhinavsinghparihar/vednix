@@ -14,6 +14,11 @@ Local-first honesty notes:
 from __future__ import annotations
 
 import re
+import hashlib
+import hmac
+import secrets
+import smtplib
+from email.message import EmailMessage
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
@@ -30,7 +35,7 @@ from core.tokens import (
     verify_access_token,
     verify_password,
 )
-from memory.models import AuthSession, User
+from memory.models import AuthSession, EmailOTP, User
 
 logger = get_logger(__name__)
 
@@ -143,6 +148,52 @@ class UserService:
             self._count_cache = None  # invalidate the middleware fast-path
             logger.info("account registered: %s (role=%s)", username, role)
             return user
+
+    async def request_email_otp(self, email: str, *, settings, ip: str = "local") -> None:
+        email = email.strip().lower()
+        if not EMAIL_RE.match(email):
+            raise AuthError("Enter a valid email address.")
+        # Avoid account enumeration: callers receive the same success response.
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        digest = hmac.new(self._secret, code.encode(), hashlib.sha256).hexdigest()
+        now = datetime.now(timezone.utc)
+        async with self._sessions() as db:
+            old = (await db.execute(select(EmailOTP).where(EmailOTP.email == email, EmailOTP.consumed == False))).scalars().all()
+            for row in old: row.consumed = True
+            db.add(EmailOTP(email=email, code_digest=digest, expires_at=now + timedelta(seconds=settings.otp_ttl_seconds)))
+            await db.commit()
+        if not (settings.smtp_host and settings.smtp_username and settings.smtp_password):
+            raise AuthError("Email OTP is not configured. Add Gmail SMTP settings to backend/.env.")
+        msg = EmailMessage()
+        msg["Subject"] = "Your Vednix AI verification code"
+        msg["From"] = settings.smtp_from or settings.smtp_username
+        msg["To"] = email
+        msg.set_content(f"Your Vednix AI verification code is {code}. It expires in 10 minutes. If you did not request it, ignore this email.")
+        def send():
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
+                if settings.smtp_starttls: server.starttls()
+                server.login(settings.smtp_username, settings.smtp_password)
+                server.send_message(msg)
+        try:
+            import asyncio
+            await asyncio.to_thread(send)
+        except Exception as exc:
+            logger.warning("OTP email delivery failed: %s", exc)
+            raise AuthError("We could not send the verification email. Check SMTP settings.") from exc
+
+    async def verify_email_otp(self, email: str, code: str) -> User:
+        email = email.strip().lower(); code = code.strip()
+        if not re.fullmatch(r"\d{6}", code): raise AuthError("Enter the 6-digit verification code.")
+        async with self._sessions() as db:
+            row = (await db.execute(select(EmailOTP).where(EmailOTP.email == email, EmailOTP.consumed == False).order_by(EmailOTP.created_at.desc()))).scalars().first()
+            if row is None or row.expires_at.replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc): raise AuthError("Verification code expired. Request a new code.")
+            row.attempts += 1
+            if row.attempts > 5: row.consumed = True; await db.commit(); raise AuthError("Too many code attempts. Request a new code.")
+            digest = hmac.new(self._secret, code.encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(digest, row.code_digest): await db.commit(); raise AuthError("Incorrect verification code.")
+            user = (await db.execute(select(User).where(User.email == email))).scalar_one_or_none()
+            if user is None: await db.commit(); raise AuthError("No Vednix account exists for this email. Create an account first.")
+            row.consumed = True; await db.commit(); return user
 
     # --- login -----------------------------------------------------------------
 

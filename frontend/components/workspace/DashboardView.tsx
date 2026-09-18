@@ -12,7 +12,6 @@ import { ArrowRight, ArrowUpRight, BookOpen, BrainCircuit, MessageSquare, Messag
 import { useChat, MAX_CHARS } from "@/store/chat";
 import { api } from "@/lib/api";
 import { Orb } from "@/components/orb/Orb";
-import { Signature } from "@/components/brand/Signature";
 import { timeAgo, cn } from "@/lib/utils";
 
 function greeting(): string {
@@ -158,7 +157,6 @@ export function DashboardView() {
             <p className="font-mono text-[10px] uppercase tracking-[0.3em] text-faint">
               core · <span className="text-gold-bright">{coreState}</span>
             </p>
-            <Signature framed />
           </div>
         </div>
       </div>

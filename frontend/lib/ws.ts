@@ -25,6 +25,7 @@ export interface OutgoingUserMessage {
   content: string;
   conversation_id: string | null;
   model?: string | null;
+  provider?: string | null;
   language?: Language | null;
   temperature?: number | null;
   attachments?: string[];
@@ -50,6 +51,7 @@ export class WSClient {
   ) {}
 
   connect(): void {
+    if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) return;
     this.closedByUser = false;
     this.onStatus("connecting");
     try {
@@ -84,9 +86,12 @@ export class WSClient {
   }
 
   private scheduleReconnect(): void {
-    if (this.closedByUser || this.retries >= 8) return;
+    if (this.closedByUser || this.retries >= 8 || this.reconnectTimer) return;
     const delay = Math.min(8000, 400 * 2 ** this.retries++);
-    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
   }
 
   get isOpen(): boolean {

@@ -63,7 +63,9 @@ interface ChatStore {
   setInternet: (v: boolean) => void;
   multiAgent: boolean;
   setMultiAgent: (v: boolean) => void;
-  provider: string; // "ollama" | "openrouter" — shown in the health footer
+  provider: string; // active provider label
+  providerChoice: string | null;
+  setProvider: (provider: string | null) => void;
 
   // voice (Phase 3)
   voiceState: VoiceState;
@@ -108,6 +110,7 @@ interface ChatStore {
 }
 
 let ws: WSClient | null = null;
+let wsToken: string | null = null;
 let streamingId: string | null = null;
 let ttsWired = false;
 
@@ -219,12 +222,19 @@ export const useChat = create<ChatStore>((set, get) => {
   }
 
   function ensureWs(): WSClient | null {
-    if (ws) return ws;
     if (typeof window === "undefined") return null;
-    // Locked API: browsers can't put Authorization on a WS upgrade, so the
-    // access token rides as ?token= (the backend's documented WS fallback).
+    // A WebSocket upgrade cannot carry an Authorization header. The session
+    // token is therefore part of the URL, and the socket must be rebuilt when
+    // login/refresh changes it. Never retain an anonymous socket after auth.
     const token = getAccessToken();
+    if (ws && wsToken !== token) {
+      ws.close();
+      ws = null;
+      wsToken = null;
+    }
+    if (ws) return ws;
     const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
+    wsToken = token;
     ws = new WSClient(url, handleFrame, (status) => set({ wsStatus: status }));
     ws.connect();
     return ws;
@@ -252,6 +262,11 @@ export const useChat = create<ChatStore>((set, get) => {
     multiAgent: false,
     setMultiAgent: (v) => set({ multiAgent: v }),
     provider: "ollama",
+    providerChoice: null,
+    setProvider: (provider) => {
+      set({ providerChoice: provider, modelOptions: [], activeModel: null });
+      void api.models(provider).then((r) => set({ modelOptions: r.available.length ? r.available : [r.default], activeModel: r.default })).catch(() => undefined);
+    },
     setVoiceState: (v) => set({ voiceState: v }),
     setVoiceReplies: (on) => {
       set({ voiceReplies: on });
@@ -313,7 +328,9 @@ export const useChat = create<ChatStore>((set, get) => {
       set({ draftAttachments: get().draftAttachments.filter((a) => a.id !== id) }),
 
     bootstrap: async () => {
-      ensureWs();
+      // Do the HTTP/auth bootstrap first. Creating the socket before the
+      // access token is available causes a legitimate 4401 handshake and an
+      // unnecessary reconnect loop.
       try {
         const [health, models, conversations] = await Promise.all([
           api.health(),
@@ -329,8 +346,9 @@ export const useChat = create<ChatStore>((set, get) => {
           provider: health.provider ?? "ollama",
           loadingConversations: false,
         });
+        ensureWs();
       } catch {
-        set({ loadingConversations: false, ollamaAvailable: false });
+        set({ loadingConversations: false, ollamaAvailable: false, wsStatus: "closed" });
       }
     },
 

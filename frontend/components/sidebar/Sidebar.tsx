@@ -13,7 +13,6 @@ import { type ConversationSummary } from "@/lib/api";
 import { cn, timeAgo } from "@/lib/utils";
 import { Button, Input } from "@/components/ui/primitives";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { Signature } from "@/components/brand/Signature";
 
 function ConversationRow({ conv, active }: { conv: ConversationSummary; active: boolean }) {
   const { selectConversation, removeConversation, togglePin, renameConversation } = useChat();
@@ -176,14 +175,13 @@ export function Sidebar() {
                   wsStatus === "open" ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-red-400 animate-pulse-soft",
                 )}
               />
-              {wsStatus === "open" ? "Backend live" : wsStatus === "connecting" ? "Connecting…" : "Reconnecting…"}
+              {wsStatus === "open" ? "Backend live" : wsStatus === "connecting" ? "Connecting…" : "Backend offline"}
             </span>
             <span className={cn(ollamaAvailable ? "text-gold/80" : "text-red-300/80")}>
               {providerLabel} {ollamaAvailable ? "✓" : "✕"}
             </span>
           </div>
           <div className="mt-2.5 flex justify-center pb-0.5">
-            <Signature />
           </div>
         </motion.aside>
       )}

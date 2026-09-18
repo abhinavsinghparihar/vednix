@@ -125,6 +125,20 @@ export const authApi = {
     return body.user;
   },
 
+  async requestEmailOtp(email: string): Promise<{ ok: boolean; message: string }> {
+    return apiFetch<{ ok: boolean; message: string }>("/api/auth/email/request", {
+      method: "POST", body: JSON.stringify({ email }),
+    }, { retryOn401: false });
+  },
+
+  async verifyEmailOtp(email: string, code: string, remember = true): Promise<UserOut> {
+    const body = await apiFetch<TokenPayload>("/api/auth/email/verify", {
+      method: "POST", body: JSON.stringify({ email, code, remember }),
+    }, { retryOn401: false });
+    setAccessToken(body.access_token);
+    return body.user;
+  },
+
   me: () => apiFetch<UserOut>("/api/auth/me"),
 
   updateMe: (patch: Partial<Pick<UserOut, "display_name" | "avatar_color" | "theme" | "language">>) =>

@@ -113,6 +113,7 @@ class EngineSession:
         attachments: list[AttachmentRef] | None = None,
         internet: bool = False,
         multi_agent: bool = False,
+        provider: str | None = None,
     ) -> AsyncIterator[str]:
         """The canonical message pipeline. Yields reply chunks.
 
@@ -267,9 +268,10 @@ class EngineSession:
         first = True
         effective_temperature = temperature if temperature is not None else settings.llm_temperature
         try:
-            async for chunk in self.core.llm.chat_stream(
-                messages, effective_temperature, model=effective_model, images=images or None
-            ):
+            stream_options = {"model": effective_model, "images": images or None}
+            if provider:
+                stream_options["provider"] = provider
+            async for chunk in self.core.llm.chat_stream(messages, effective_temperature, **stream_options):
                 if first:
                     await self.state.set(CoreState.SPEAKING)
                     first = False

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Query
 
 from ai_engine.ollama_client import OllamaError
 from api.deps import get_core
@@ -28,9 +28,9 @@ async def health(request: Request, core: EngineCore = Depends(get_core)) -> Heal
 
 
 @router.get("/models")
-async def models(core: EngineCore = Depends(get_core)) -> dict:
+async def models(provider: str | None = Query(default=None), core: EngineCore = Depends(get_core)) -> dict:
     try:
-        available = await core.llm.list_models()
+        available = await core.llm.list_models(provider=provider) if provider else await core.llm.list_models()
     except OllamaError:
         available = []
     return {"default": core.llm.model, "available": available}

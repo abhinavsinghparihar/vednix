@@ -18,6 +18,8 @@ from api.deps import current_user, get_auth_limiter, get_users
 from api.schemas import (
     ChangePasswordIn,
     LoginIn,
+    EmailOTPRequestIn,
+    EmailOTPVerifyIn,
     ProfileUpdateIn,
     RegisterIn,
     SessionOut,
@@ -115,6 +117,29 @@ async def login(body: LoginIn, request: Request, response: Response,
             username=body.username, password=body.password, remember=body.remember,
             device_label=body.device_label or _ua_label(request), ip=_client_ip(request),
         )
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    _set_session_cookies(response, tokens, remember=body.remember)
+    return _token_payload(user, tokens)
+
+
+@router.post("/email/request")
+async def request_email_otp(body: EmailOTPRequestIn, request: Request, users: UserService = Depends(get_users)):
+    await _throttle(request, "email-otp")
+    settings = request.app.state.settings
+    try:
+        await users.request_email_otp(body.email, settings=settings, ip=_client_ip(request))
+    except AuthError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"ok": True, "message": "If this email is registered, a verification code has been sent."}
+
+
+@router.post("/email/verify")
+async def verify_email_otp(body: EmailOTPVerifyIn, request: Request, response: Response, users: UserService = Depends(get_users)):
+    await _throttle(request, "email-otp-verify")
+    try:
+        user = await users.verify_email_otp(body.email, body.code)
+        tokens = await users.issue_session_for(user, remember=body.remember, device_label=_ua_label(request))
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     _set_session_cookies(response, tokens, remember=body.remember)

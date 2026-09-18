@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -29,12 +30,28 @@ FRONTEND = ROOT / "frontend"
 VENV = ROOT / ".venv"
 LOGS = ROOT / "logs"
 ENGINE_URL = "http://localhost:11434"
-APP_URL = "http://localhost:3000"
+APP_PORT = 3000
+APP_URL = f"http://localhost:{APP_PORT}"
 HEALTH_URL = "http://localhost:8000/api/health"
 DEFAULT_MODEL = "qwen2.5:3b"
 IS_WIN = platform.system() == "Windows"
 IS_MAC = platform.system() == "Darwin"
 
+
+
+def choose_frontend_port() -> int:
+    """Use 3000 normally, but keep the launcher/browser in sync when a
+    stale Next.js process already owns it. The backend explicitly allows both
+    supported local development ports.
+    """
+    for port in (3000, 3001):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            if sock.connect_ex(("127.0.0.1", port)) != 0:
+                return port
+    fail("Ports 3000 and 3001 are already in use.",
+         "Close the old Vednix/Next.js window, then run start.bat again.")
+    return 3000
 
 def step(n: int, total: int, what: str) -> None:
     print(f"\n\033[1mStep {n}/{total} — {what}\033[0m", flush=True)
@@ -237,7 +254,10 @@ def main() -> None:
     ensure_model(find_ollama() or "ollama")
 
     # ---- 7/8: start the two servers --------------------------------------------
-    step(7, 8, "Starting Vednix — backend on :8000, frontend on :3000")
+    global APP_PORT, APP_URL
+    APP_PORT = choose_frontend_port()
+    APP_URL = f"http://localhost:{APP_PORT}"
+    step(7, 8, f"Starting Vednix — backend on :8000, frontend on :{APP_PORT}")
     backend_log = (LOGS / "backend.log").open("ab")
     frontend_log = (LOGS / "frontend.log").open("ab")
     children: list[subprocess.Popen] = []
@@ -251,7 +271,8 @@ def main() -> None:
         cwd=BACKEND, stdout=backend_log, stderr=subprocess.STDOUT, **popen_kwargs))
     time.sleep(2)
     children.append(subprocess.Popen(
-        npm_cmd("start"), cwd=FRONTEND, stdout=frontend_log, stderr=subprocess.STDOUT, **popen_kwargs))
+        npm_cmd("start", "--", "-p", str(APP_PORT)), cwd=FRONTEND,
+        stdout=frontend_log, stderr=subprocess.STDOUT, **popen_kwargs))
 
     # ---- 8/8: health + browser --------------------------------------------------
     step(8, 8, "Waiting for the heartbeat, then opening your browser")

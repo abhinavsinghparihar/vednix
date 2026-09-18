@@ -12,7 +12,6 @@ import { useEffect, useState, type ReactNode } from "react";
 import { motion } from "framer-motion";
 import { Orb } from "@/components/orb/Orb";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { Signature } from "@/components/brand/Signature";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
@@ -132,7 +131,6 @@ export function AuthShell({
       </div>
 
       <footer className="relative z-10 pb-5 pt-2 text-center">
-        <Signature />
       </footer>
     </main>
   );

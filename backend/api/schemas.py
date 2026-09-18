@@ -100,6 +100,7 @@ class WSUserMessage(BaseModel):
     conversation_id: str | None = None
     client_id: str | None = None
     model: str | None = None
+    provider: str | None = Field(default=None, max_length=32)
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     attachments: list[str] = Field(default_factory=list, max_length=5)  # uploaded file ids
@@ -129,6 +130,16 @@ class LoginIn(BaseModel):
     password: str = Field(min_length=1, max_length=256)
     remember: bool = False
     device_label: str = Field(default="", max_length=160)
+
+
+class EmailOTPRequestIn(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+
+
+class EmailOTPVerifyIn(BaseModel):
+    email: str = Field(min_length=5, max_length=255)
+    code: str = Field(min_length=6, max_length=6)
+    remember: bool = True
 
 
 class ProfileUpdateIn(BaseModel):

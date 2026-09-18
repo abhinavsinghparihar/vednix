@@ -24,7 +24,6 @@ import { useAuth } from "@/store/auth";
 import { useRouteGuard } from "@/lib/useGuard";
 import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
-import { Signature } from "@/components/brand/Signature";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { AuthError, AuthSubmit, PasswordField } from "@/components/auth/fields";
 import { Button } from "@/components/ui/primitives";
@@ -270,7 +269,7 @@ function ProfileInner() {
           )}
         </div>
 
-        <footer className="mt-12 text-center"><Signature framed /></footer>
+        <footer className="mt-12 text-center"></footer>
       </div>
     </main>
   );

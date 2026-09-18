@@ -96,6 +96,7 @@ async def _stream_reply(
     attachments: list[AttachmentRef],
     internet: bool = False,
     multi_agent: bool = False,
+    provider: str | None = None,
 ) -> None:
     async def forward_state(state) -> None:
         await sender.send({"type": "state_changed", "state": state.name})
@@ -112,7 +113,7 @@ async def _stream_reply(
         )
         async for chunk in session.stream_reply(
             text, model=model, temperature=temperature, attachments=attachments,
-            internet=internet, multi_agent=multi_agent,
+            internet=internet, multi_agent=multi_agent, provider=provider,
         ):
             partial.append(chunk)
             await sender.send({"type": "token", "message_id": message_id, "content": chunk})
@@ -237,7 +238,7 @@ async def ws_chat(ws: WebSocket) -> None:
                     _stream_reply(
                         session, sender, message_id, text,
                         payload.model or conv.model, payload.temperature, attachment_refs,
-                        payload.internet, payload.multi_agent,
+                        payload.internet, payload.multi_agent, payload.provider,
                     )
                 )
                 if first_exchange:

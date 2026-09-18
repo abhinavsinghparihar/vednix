@@ -88,7 +88,11 @@ export default function SignupPage() {
       } catch {
         /* offline → workspace handles it */
       }
-      router.replace(status && !status.setup_complete ? "/onboarding" : "/chat");
+      // Registration is the hand-off point into first-run setup. If the
+      // follow-up status probe is temporarily unavailable, keep the user on
+      // the setup screen rather than dropping them into a chat that cannot
+      // initialize and starting a reconnect loop.
+      router.replace(status && status.setup_complete ? "/chat" : "/onboarding");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Backend unreachable — is Vednix running?");
     } finally {

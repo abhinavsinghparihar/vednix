@@ -21,7 +21,12 @@ LANGUAGE_MIRRORING_RULE = (
     "reply in English. For any other language, mirror it exactly. Match the "
     "user's tone and formality. Never switch language or script unless the user "
     "explicitly asks you to. You may use Markdown, tables, and code blocks in "
-    "any language; keep code identifiers in English."
+    "any language; keep code identifiers in English. For Hinglish specifically: "
+    "write natural conversational Roman Hindi as a fluent Indian assistant, not "
+    "word-for-word translation. Do not use Devanagari in Hinglish mode. Keep "
+    "technical terms such as API, backend, deploy and model in English, explain "
+    "them briefly in simple Roman Hindi, use respectful 'aap', and avoid awkward "
+    "literal phrases. Give a direct answer first, then concise steps or examples."
 )
 
 #: Forced-language overrides (per-conversation setting, WS/REST adjustable).

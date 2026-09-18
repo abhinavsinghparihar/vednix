@@ -12,7 +12,6 @@ import { BookOpen, BrainCircuit, LayoutGrid, MessageSquare, Settings2, UserRound
 import { useChat, type WorkspaceView } from "@/store/chat";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { LogoMark } from "@/components/brand/LogoMark";
-import { TricolorSignatureText } from "@/components/brand/Signature";
 import { cn } from "@/lib/utils";
 
 const ITEMS: { view: WorkspaceView; label: string; icon: typeof LayoutGrid }[] = [
@@ -75,10 +74,8 @@ export function Rail() {
         </Link>
         <ThemeToggle />
         <span
-          aria-label="Made by Abhinav Singh"
           className="font-mono text-[8px] uppercase tracking-[0.26em] [writing-mode:vertical-rl]"
         >
-          <TricolorSignatureText />
         </span>
       </div>
     </nav>

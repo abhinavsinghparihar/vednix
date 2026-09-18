@@ -144,3 +144,12 @@ vednix/
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — how Vednix works + design principles
 - **[docs/API.md](docs/API.md)** — REST + WebSocket protocol reference
 - **[docs/FRONTEND.md](docs/FRONTEND.md)** — the workspace UI, routing law, run modes
+
+## Secure email OTP login
+
+Vednix supports optional email OTP login through an SMTP relay. For Gmail, enable
+2-Step Verification, create a Gmail App Password, then copy the SMTP settings
+from `backend/.env.example` into `backend/.env`. Vednix stores only a digest of
+the OTP, expires codes after ten minutes, limits attempts, and never logs the
+code. Google OAuth is not faked: it requires real OAuth credentials and remains
+an explicit future configuration step.

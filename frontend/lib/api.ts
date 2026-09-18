@@ -5,7 +5,7 @@
 
 import type { Language } from "./ws";
 import { API_BASE, WS_URL } from "./config";
-import { ApiError, apiFetch } from "./tokenVault";
+import { ApiError, apiFetch, getAccessToken } from "./tokenVault";
 
 export { API_BASE, WS_URL };
 export { ApiError };
@@ -74,7 +74,9 @@ export interface KnowledgeHit {
 
 export const api = {
   health: () => request<{ status: string; provider?: string; ollama_available: boolean; default_model: string }>("/api/health"),
-  models: () => request<{ default: string; available: string[] }>("/api/models"),
+  models: (provider?: string | null) => request<{ default: string; available: string[] }>(
+    `/api/models${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
+  ),
 
   listConversations: () => request<ConversationSummary[]>("/api/conversations"),
   getConversation: (id: string) => request<ConversationDetail>(`/api/conversations/${id}`),
@@ -92,7 +94,13 @@ export const api = {
   uploadFiles: async (files: File[]): Promise<UploadedFileMeta[]> => {
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
-    const resp = await fetch(`${API_BASE}/api/uploads`, { method: "POST", body: form });
+    const token = getAccessToken();
+    const resp = await fetch(`${API_BASE}/api/uploads`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new ApiError(resp.status, body.detail ?? "Upload failed");

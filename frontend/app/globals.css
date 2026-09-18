@@ -202,27 +202,27 @@ html, body {
    app (landing + workspace) at runtime. Dark stays the default.
    ============================================================ */
 html[data-theme="light"] {
-  --color-void: #f4f0e6;
-  --color-obsidian: #faf7ef;
-  --color-charcoal: #efe9db;
+  /* Ivory / indigo editorial light theme: neutral enough for long sessions,
+     warm Vednix accents retained only for emphasis. */
+  --color-void: #f5f5f7;
+  --color-obsidian: #ffffff;
+  --color-charcoal: #eef0f4;
   --color-panel: #ffffff;
-  --color-panel-2: #f6f1e6;
-  --color-edge: #e3dac6;
-  --color-edge-soft: #eae2d0;
+  --color-panel-2: #f8f9fb;
+  --color-edge: #dfe3ea;
+  --color-edge-soft: #e9ecf1;
 
-  /* bronze family — gold darkened for contrast on ivory */
-  --color-gold: #a97e2c;
-  --color-gold-bright: #8a651f;
-  --color-gold-dim: #c4a05e;
-  --color-ember: #c06322;
-  --color-cream: #221b0e;
-  --color-muted: #6e6350;
-  --color-faint: #9a8d74;
+  --color-gold: #a16207;
+  --color-gold-bright: #854d0e;
+  --color-gold-dim: #c59a4a;
+  --color-ember: #c2410c;
+  --color-cream: #0a0a0a;
+  --color-muted: #5b5b65;
+  --color-faint: #6b7280;
+  --color-danger: #b42318;
 
-  --color-danger: #ce3f38;
-
-  --shadow-glow-gold: 0 0 24px -8px rgba(169, 126, 44, 0.45);
-  --shadow-card: 0 20px 50px -22px rgba(110, 88, 40, 0.35);
+  --shadow-glow-gold: 0 0 28px -10px rgba(161, 98, 7, 0.35);
+  --shadow-card: 0 20px 55px -24px rgba(20, 30, 50, 0.22);
 }
 
 html[data-theme="light"] ::selection { background: rgba(169, 126, 44, 0.28); color: #221b0e; }
@@ -233,26 +233,38 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background: #a99973;
 
 @layer components {
   html[data-theme="light"] .glass {
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.46));
-    border: 1px solid rgba(60, 46, 16, 0.09);
+    background: linear-gradient(145deg, rgba(255,255,255,.92), rgba(248,249,251,.78));
+    border-color: rgba(15,23,42,.09);
+    box-shadow: 0 8px 24px -18px rgba(15,23,42,.28);
   }
   html[data-theme="light"] .glass-strong {
-    background: linear-gradient(160deg, rgba(255, 255, 255, 0.86), rgba(250, 247, 239, 0.94));
-    border: 1px solid rgba(60, 46, 16, 0.09);
+    background: rgba(255,255,255,.96);
+    border-color: rgba(15,23,42,.10);
+    box-shadow: 0 24px 70px -32px rgba(15,23,42,.28);
   }
   html[data-theme="light"] .glass-liquid {
-    background: linear-gradient(155deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.6) 45%, rgba(169, 126, 44, 0.07));
-    border: 1px solid rgba(60, 46, 16, 0.1);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 18px 44px -18px rgba(110, 88, 40, 0.3);
+    background: linear-gradient(145deg, rgba(255,255,255,.96), rgba(242,244,248,.88) 62%, rgba(161,98,7,.055));
+    border-color: rgba(15,23,42,.11);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.95), 0 20px 48px -22px rgba(15,23,42,.28);
   }
   html[data-theme="light"] .text-gold-gradient {
-    background: linear-gradient(115deg, #8a651f, #a97e2c 45%, #7c5a17 75%, #b08a3c);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
+    background: linear-gradient(115deg, #854d0e, #a16207 48%, #b45309 78%, #92400e);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
   }
   html[data-theme="light"] .skeleton {
-    background: linear-gradient(90deg, rgba(60,46,16,.06) 25%, rgba(60,46,16,.10) 37%, rgba(60,46,16,.06) 63%);
+    background: linear-gradient(90deg, rgba(15,23,42,.055) 25%, rgba(15,23,42,.11) 37%, rgba(15,23,42,.055) 63%);
     background-size: 200% 100%;
   }
+  /* Existing white-tint utilities were designed for Obsidian. Convert them
+     to cool translucent ink in Ivory so cards never look dirty or washed out. */
+  html[data-theme="light"] [class*="bg-white/"] { background-color: rgba(15,23,42,.045); }
+  html[data-theme="light"] [class*="border-white/"] { border-color: rgba(15,23,42,.10); }
+  html[data-theme="light"] [class*="hover\:bg-white\/"]:hover { background-color: rgba(15,23,42,.075); }
+  html[data-theme="light"] .text-white { color: #0a0a0a; }
 }
+
+/* Light-mode text utility corrections; variables remain the source of truth. */
+html[data-theme="light"] .text-muted { color: #5b5b65; }
+html[data-theme="light"] .text-faint { color: #6b7280; }
+html[data-theme="light"] .text-cream { color: #0a0a0a; }
+html[data-theme="light"] .md-body td { color: #374151; }

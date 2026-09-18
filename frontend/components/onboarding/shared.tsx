@@ -11,7 +11,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, Copy } from "lucide-react";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { Signature } from "@/components/brand/Signature";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
@@ -70,7 +69,6 @@ export function WizardShell({
       </div>
 
       <footer className="relative z-10 pb-5 text-center">
-        <Signature framed />
       </footer>
     </main>
   );

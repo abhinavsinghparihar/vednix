@@ -9,7 +9,6 @@ import { motion } from "framer-motion";
 import { Clock3, Cpu, Languages, BrainCircuit } from "lucide-react";
 import { useChat, useDisplayCoreState } from "@/store/chat";
 import { Orb } from "@/components/orb/Orb";
-import { Signature } from "@/components/brand/Signature";
 
 const SUGGESTIONS = [
   { icon: Clock3, label: "अभी समय क्या है?", hint: "plugin · Hindi" },
@@ -78,7 +77,6 @@ export function EmptyState() {
         transition={{ delay: 0.9, duration: 0.7 }}
         className="mt-12"
       >
-        <Signature framed />
       </motion.div>
     </div>
   );

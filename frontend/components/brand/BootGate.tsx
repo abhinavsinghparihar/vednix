@@ -12,7 +12,6 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Orb } from "@/components/orb/Orb";
 import { Wordmark } from "@/components/brand/Wordmark";
-import { Signature } from "@/components/brand/Signature";
 import { EASE_CURVE } from "@/lib/utils";
 
 const BOOT_KEY = "vednix.booted";
@@ -85,7 +84,6 @@ export function BootGate() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.7, delay: 0.8 }}
           >
-            <Signature framed />
           </motion.div>
 
           {/* progress hairline */}

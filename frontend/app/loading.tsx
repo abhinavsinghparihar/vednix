@@ -3,7 +3,6 @@
  * loads. Wordmark, soft pulse, creator signature. Nothing else.
  */
 
-import { Signature } from "@/components/brand/Signature";
 import { Wordmark } from "@/components/brand/Wordmark";
 
 export default function Loading() {
@@ -12,7 +11,6 @@ export default function Loading() {
       <span className="animate-pulse-soft">
         <Wordmark />
       </span>
-      <Signature framed />
     </div>
   );
 }

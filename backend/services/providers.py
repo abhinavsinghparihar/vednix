@@ -70,9 +70,9 @@ REGISTRY: dict[str, ProviderSpec] = {p.id: p for p in [
     ProviderSpec(
         "gemini", "Google Gemini", "openai",
         "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.0-flash",
+        "gemini-2.5-flash",
         "https://aistudio.google.com/apikey", "https://ai.google.dev/gemini-api/docs", True,
-        ("gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"),
+        ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"),
         blurb="Fast and generous free tier from Google AI Studio.",
     ),
     ProviderSpec(
@@ -358,7 +358,7 @@ class ProviderService:
                         models_preview = await client.list_models()  # type: ignore[attr-defined]
                         ok = True
                     except CloudProviderError as exc:
-                        detail = str(exc)
+                        detail = f"{spec.label} API key verification failed: {exc}"
                     finally:
                         await client.aclose()  # type: ignore[attr-defined]
             if row is not None:
@@ -443,7 +443,7 @@ class ResilientLLM:
             self._cloud_cache[provider] = (version, client)
         return client
 
-    async def _candidates(self) -> "list[tuple[str, object]]":
+    async def _candidates(self, preferred: str | None = None) -> "list[tuple[str, object]]":
         out: list[tuple[str, object]] = []
         if self._pinned is not None:
             out.append(self._pinned)
@@ -452,6 +452,8 @@ class ResilientLLM:
             client = await self._client_for(provider)
             if client is not None:
                 out.append((provider, client))
+        if preferred:
+            out.sort(key=lambda item: 0 if item[0] == preferred else 1)
         return out
 
     # -- LLMClient Protocol -----------------------------------------------------
@@ -480,11 +482,11 @@ class ResilientLLM:
             return self._settings.is_vision_model(model or self._ollama.model)
         return self._settings.is_vision_model(model or self._ollama.model)
 
-    async def list_models(self) -> list[str]:
+    async def list_models(self, provider: str | None = None) -> list[str]:
         """Uncached live list from the first reachable provider (the REST
         /api/models contract — mirrors list_models_cached's routing)."""
-        for provider, client in await self._candidates():
-            if provider == "ollama":
+        for provider_name, client in await self._candidates(provider):
+            if provider_name == "ollama":
                 if await client.is_available():
                     self._active_label = ENGINE_LABEL
                     try:
@@ -492,7 +494,7 @@ class ResilientLLM:
                     except OllamaError:
                         continue
             else:
-                self._active_label = getattr(client, "provider_name", provider)
+                self._active_label = getattr(client, "provider_name", provider_name)
                 try:
                     return await client.list_models()
                 except OllamaError:
@@ -538,9 +540,9 @@ class ResilientLLM:
         return []
 
     async def chat(self, messages: list[dict], temperature: float, *,
-                   model: str | None = None, images: list[str] | None = None) -> str:
+                   model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> str:
         errors: list[str] = []
-        for provider, client in await self._candidates():
+        for provider, client in await self._candidates(provider):
             if provider == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
                 errors.append(f"{ENGINE_LABEL}: not running")
                 continue
@@ -554,10 +556,10 @@ class ResilientLLM:
         raise OllamaError("All providers failed — " + "; ".join(errors)[:300])
 
     async def chat_stream(self, messages: list[dict], temperature: float, *,
-                          model: str | None = None, images: list[str] | None = None) -> AsyncIterator[str]:
+                          model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> AsyncIterator[str]:
         errors: list[str] = []
         self.last_handoff = None
-        for provider, client in await self._candidates():
+        for provider, client in await self._candidates(provider):
             if provider == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
                 errors.append(f"{ENGINE_LABEL}: not running")
                 continue

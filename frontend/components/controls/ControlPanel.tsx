@@ -16,10 +16,10 @@ import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Globe, Volume2, ChevronDown, Play, Bot } from "lucide-react";
 import { useChat } from "@/store/chat";
+import { providerApi, type ProviderConfig } from "@/lib/authApi";
 import type { Language } from "@/lib/ws";
 import { tts } from "@/lib/tts";
 import { Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
-import { Signature } from "@/components/brand/Signature";
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
   { value: "auto", label: "Auto" },
@@ -100,7 +100,11 @@ function VoiceSection() {
 }
 
 export function ControlPanel() {
-  const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature } = useChat();
+  const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature, providerChoice, setProvider } = useChat();
+  const [providerOptions, setProviderOptions] = useState<ProviderConfig[]>([]);
+  useEffect(() => {
+    void providerApi.configured().then((r) => setProviderOptions(r.providers)).catch(() => setProviderOptions([]));
+  }, []);
   const internet = useChat((s) => s.internet);
   const setInternet = useChat((s) => s.setInternet);
   const multiAgent = useChat((s) => s.multiAgent);
@@ -121,6 +125,22 @@ export function ControlPanel() {
         >
           <div className="no-scrollbar flex h-full flex-col gap-6 overflow-y-auto">
             <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-faint">Studio</p>
+
+            <Section title="Agent / Provider">
+              <select
+                value={providerChoice ?? "auto"}
+                onChange={(e) => setProvider(e.target.value === "auto" ? null : e.target.value)}
+                className="glass w-full rounded-xl px-3 py-2.5 text-sm text-cream outline-none [&>option]:bg-charcoal"
+                aria-label="Select AI provider"
+              >
+                <option value="auto">Automatic priority (recommended)</option>
+                <option value="ollama">Vednix Engine · Ollama</option>
+                {providerOptions.filter((p) => p.provider !== "ollama" && p.enabled && p.has_key).map((p) => (
+                  <option key={p.provider} value={p.provider}>{p.label}</option>
+                ))}
+              </select>
+              <p className="text-[11px] leading-snug text-faint">Choose a configured agent for this chat, or let Vednix fail over automatically.</p>
+            </Section>
 
             <Section title="Model">
               <div className="relative">
@@ -199,7 +219,6 @@ export function ControlPanel() {
               <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-faint">
                 next-gen workspace · v0.1 · fully local
               </span>
-              <Signature framed className="mt-1" />
             </div>
           </div>
         </motion.aside>

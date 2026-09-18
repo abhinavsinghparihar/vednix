@@ -14,7 +14,6 @@ import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowRight, ArrowUpRight } from "lucide-react";
 import { MicroLabel, Reveal } from "./shared";
 import { OrbStage } from "./OrbStage";
-import { Signature } from "@/components/brand/Signature";
 import { MAX_CHARS, useChat } from "@/store/chat";
 
 const STATS = [
@@ -209,7 +208,6 @@ export function Hero() {
       <p className="pointer-events-none absolute bottom-7 left-6 hidden font-mono text-[9px] tracking-[0.3em] text-faint lg:block xl:left-14">
         VEDNIX AI · 2026
       </p>
-      <Signature className="pointer-events-none absolute bottom-7 right-6 hidden lg:inline-flex xl:right-14" />
     </section>
   );
 }

@@ -51,13 +51,25 @@ class Settings(BaseSettings):
     redis_url: str = ""  # empty → in-process rate limiting
     auth_token: str = ""  # empty → open local mode (single-user default)
 
+    # Optional email OTP login (Gmail App Password or any SMTP relay).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_starttls: bool = True
+    otp_ttl_seconds: int = 600
+
     # --- Server ---
     host: str = "127.0.0.1"
     port: int = 8000
     # auto-reload watches the source tree — great for hacking, wasteful (and
     # process-forking) in normal runs. Off by default; VEDNIX_DEV_RELOAD=1.
     dev_reload: bool = False
-    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"  # both loopback forms
+    cors_origins: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:3001,http://127.0.0.1:3001"
+    )  # common Next.js fallback port, explicit origins only
 
     # --- Database ---
     database_url: str = "sqlite+aiosqlite:///./data/vednix.db"
@@ -99,7 +111,18 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        """Return explicit local development origins plus configured origins.
+
+        Keep credentialed CORS allowlisted (never ``*``), while making an old
+        .env copied from a previous Vednix release safe when Next.js falls back
+        from port 3000 to 3001.
+        """
+        configured = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        local = [
+            "http://localhost:3000", "http://127.0.0.1:3000",
+            "http://localhost:3001", "http://127.0.0.1:3001",
+        ]
+        return list(dict.fromkeys([*configured, *local]))
 
     @property
     def vision_keywords_list(self) -> list[str]:

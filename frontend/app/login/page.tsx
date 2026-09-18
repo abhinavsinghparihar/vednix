@@ -12,7 +12,7 @@
 import { Suspense, useCallback, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { TerminalSquare, Copy, Check, ArrowLeft } from "lucide-react";
+import { TerminalSquare, Copy, Check, ArrowLeft, Mail, ShieldCheck } from "lucide-react";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { AuthCheck, AuthError, AuthField, AuthSubmit, PasswordField } from "@/components/auth/fields";
 import { authApi, onboardingApi } from "@/lib/authApi";
@@ -20,6 +20,7 @@ import { ApiError } from "@/lib/tokenVault";
 import { useAuth } from "@/store/auth";
 
 type View = "login" | "forgot";
+type LoginMethod = "password" | "otp";
 
 function LoginInner() {
   const router = useRouter();
@@ -28,6 +29,9 @@ function LoginInner() {
   const refreshOnboarding = useAuth((s) => s.refreshOnboarding);
 
   const [view, setView] = useState<View>("login");
+  const [method, setMethod] = useState<LoginMethod>("password");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -57,17 +61,33 @@ function LoginInner() {
   const submit = async (e?: FormEvent) => {
     e?.preventDefault();
     if (loading) return;
-    if (!identifier.trim() || !password) {
-      fail("Enter your username (or email) and password.");
+    if (!identifier.trim()) {
+      fail(method === "otp" ? "Enter your email address." : "Enter your username (or email).");
+      return;
+    }
+    if (method === "password" && !password) {
+      fail("Enter your password.");
+      return;
+    }
+    if (method === "otp" && otpSent && !/^\d{6}$/.test(otp)) {
+      fail("Enter the 6-digit verification code from your email.");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const user = await authApi.login({ username: identifier.trim(), password, remember });
-      setUser(user);
-      await refreshOnboarding();
-      await goAfterAuth();
+      if (method === "otp" && !otpSent) {
+        await authApi.requestEmailOtp(identifier.trim());
+        setOtpSent(true);
+        setError(null);
+      } else {
+        const user = method === "otp"
+          ? await authApi.verifyEmailOtp(identifier.trim(), otp, remember)
+          : await authApi.login({ username: identifier.trim(), password, remember });
+        setUser(user);
+        await refreshOnboarding();
+        await goAfterAuth();
+      }
     } catch (err) {
       fail(err instanceof ApiError ? err.message : "Backend unreachable — is Vednix running?");
     } finally {
@@ -132,9 +152,13 @@ function LoginInner() {
       title="Welcome back"
       subtitle="Sign in to your Vednix workspace — your models, memories and settings, exactly as you left them."
     >
+      <div className="mb-5 grid grid-cols-2 gap-1 rounded-xl bg-white/[0.04] p-1 text-xs">
+        <button type="button" onClick={() => { setMethod("password"); setOtpSent(false); setError(null); }} className={`rounded-lg px-3 py-2 transition ${method === "password" ? "bg-gold/15 text-gold-bright" : "text-muted"}`}>Password</button>
+        <button type="button" onClick={() => { setMethod("otp"); setError(null); }} className={`rounded-lg px-3 py-2 transition ${method === "otp" ? "bg-gold/15 text-gold-bright" : "text-muted"}`}><Mail className="mr-1 inline h-3.5 w-3.5" />Email OTP</button>
+      </div>
       <form onSubmit={submit} className="space-y-4" key={shake} noValidate={false}>
         <AuthField
-          label="Username or Email"
+          label={method === "otp" ? "Email address" : "Username or Email"}
           autoComplete="username"
           autoFocus
           value={identifier}
@@ -143,7 +167,7 @@ function LoginInner() {
           invalid={!!error}
           disabled={loading}
         />
-        <PasswordField
+        {method === "password" ? <PasswordField
           label="Password"
           autoComplete="current-password"
           value={password}
@@ -151,7 +175,17 @@ function LoginInner() {
           placeholder="••••••••"
           invalid={!!error}
           disabled={loading}
-        />
+        /> : otpSent ? <AuthField
+          label="6-digit email code"
+          inputMode="numeric"
+          autoComplete="one-time-code"
+          value={otp}
+          onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))}
+          placeholder="123456"
+          invalid={!!error}
+          disabled={loading}
+          trailing={<ShieldCheck className="h-4 w-4 text-gold" />}
+        /> : <p className="rounded-xl border border-gold/20 bg-gold/5 px-3 py-2 text-xs leading-relaxed text-muted">We will send a one-time code to your email. It expires in 10 minutes and can be tried only five times.</p>}
 
         <div className="flex items-center justify-between pt-0.5">
           <AuthCheck id="remember" checked={remember} onChange={setRemember}>
@@ -167,7 +201,7 @@ function LoginInner() {
         </div>
 
         <AuthError message={error} />
-        <AuthSubmit loading={loading}>Sign in</AuthSubmit>
+        <AuthSubmit loading={loading}>{method === "otp" ? (otpSent ? "Verify code" : "Send email code") : "Sign in"}</AuthSubmit>
       </form>
 
       <p className="mt-4 text-center text-xs text-faint">

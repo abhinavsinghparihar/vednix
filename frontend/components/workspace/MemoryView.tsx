@@ -9,7 +9,6 @@
 import { useEffect, useState } from "react";
 import { BrainCircuit, Loader2, Plus, Trash2 } from "lucide-react";
 import { api, type MemoryItem } from "@/lib/api";
-import { Signature } from "@/components/brand/Signature";
 
 export function MemoryView() {
   const [items, setItems] = useState<MemoryItem[] | null>(null);
@@ -51,7 +50,6 @@ export function MemoryView() {
               machine, searchable, deletable, never sent anywhere.
             </p>
           </div>
-          <Signature framed className="mt-4" />
         </div>
 
         <form

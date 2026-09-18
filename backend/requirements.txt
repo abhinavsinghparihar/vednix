@@ -17,3 +17,6 @@ python-multipart>=0.0.9
 langgraph>=0.2
 # Phase 5 — optional infra (imported lazily; safe to install always)
 redis>=5.0
+
+# Encrypted provider keys and session secret
+cryptography>=43.0

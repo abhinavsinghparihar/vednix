@@ -140,6 +140,19 @@ class User(Base):
     )
 
 
+class EmailOTP(Base):
+    """One-time email login challenge. Only a digest is persisted."""
+    __tablename__ = "email_otps"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(String(255), index=True)
+    code_digest: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
 class AuthSession(Base):
     """A signed-in device. Stores only the refresh-token DIGEST — a db leak
     yields nothing replayable. Revocation = one row flip (Security → devices)."""

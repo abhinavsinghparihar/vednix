@@ -9,7 +9,6 @@
 import { useRef, useState, useEffect } from "react";
 import { BookOpen, FileText, Loader2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { api, type KnowledgeDoc, type KnowledgeHit } from "@/lib/api";
-import { Signature } from "@/components/brand/Signature";
 
 /** render FTS5 «marked» terms as gold highlights */
 function Snippet({ text }: { text: string }) {
@@ -85,7 +84,6 @@ export function KnowledgeView() {
               on-device FTS5 + BM25, with «snippets» proving where answers came from.
             </p>
           </div>
-          <Signature framed className="mt-4" />
         </div>
 
         <input

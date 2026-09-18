@@ -36,7 +36,6 @@ import { useChat } from "@/store/chat";
 import { useRouteGuard } from "@/lib/useGuard";
 import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
-import { Signature } from "@/components/brand/Signature";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { Button, Segmented, Slider, Switch } from "@/components/ui/primitives";
 import { CopyChip, StatusDot } from "@/components/onboarding/shared";
@@ -190,7 +189,7 @@ export default function SettingsPage() {
               {tab === "about" && <AboutPanel />}
             </div>
           </AnimatePresence>
-          <footer className="mt-12 text-center"><Signature framed /></footer>
+          <footer className="mt-12 text-center"></footer>
         </div>
       </div>
     </main>
@@ -827,7 +826,6 @@ function AboutPanel() {
       </Card>
       <Card title="Credits" icon={Info}>
         <div className="flex flex-col items-center gap-3 py-4">
-          <Signature framed />
           <p className="text-center text-[11px] leading-relaxed text-faint">
             Designed and engineered with an obsession for local-first AI.
           </p>

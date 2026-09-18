@@ -33,6 +33,10 @@ OPEN_PATHS = (
     # logout authenticates via the refresh cookie + CSRF pair — it MUST work
     # even after the (20-minute) access token has expired
     "/api/auth/logout",
+    "/api/auth/email/request",
+    "/api/auth/email/verify",
+    "/api/auth/google/start",
+    "/api/auth/google/callback",
     "/api/onboarding/status",
 )
 
