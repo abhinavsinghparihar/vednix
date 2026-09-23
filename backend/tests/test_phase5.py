@@ -270,6 +270,8 @@ def test_provider_switch_env_key_pins_openrouter_first(settings, monkeypatch):
         assert health["provider_configured"] is True
         assert health["provider_verified"] is False
         assert health["chat_available"] is False
+        models = client.get("/api/models", params={"provider": "openrouter"}).json()
+        assert "x-ai/grok-4.20" in models["available"]
 
 
 # --- internet research through the WS pipeline -------------------------------------

@@ -38,7 +38,7 @@ from memory.service import MemoryService
 from services.file_store import FileStore
 from services.knowledge import KnowledgeService
 from services.onboarding import OnboardingService
-from services.providers import ProviderService, ResilientLLM
+from services.providers import REGISTRY, ProviderService, ResilientLLM
 from services.users import UserService
 
 logger = get_logger(__name__)
@@ -59,6 +59,9 @@ def _build_llm(settings: Settings, providers: ProviderService):
     if settings.llm_provider.lower() == "openrouter" and settings.openrouter_api_key:
         from ai_engine.cloud_client import OpenAICompatibleClient
 
+        openrouter_models = list(REGISTRY["openrouter"].static_models)
+        if settings.openrouter_model not in openrouter_models:
+            openrouter_models.insert(0, settings.openrouter_model)
         pinned = (
             "openrouter (env)",
             OpenAICompatibleClient(
@@ -68,8 +71,8 @@ def _build_llm(settings: Settings, providers: ProviderService):
                 provider_name="OpenRouter (env)",
                 timeout=settings.llm_request_timeout,
                 health_ttl=settings.llm_health_ttl,
-                static_models=[settings.openrouter_model],
-                supported_models=[settings.openrouter_model],
+                static_models=openrouter_models,
+                supported_models=openrouter_models,
             ),
         )
     return ResilientLLM(ollama, providers, settings, pinned=pinned)

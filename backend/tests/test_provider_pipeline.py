@@ -107,6 +107,64 @@ def install_gemini_mock(app, *, reject_key: bool = False, fail_stream: bool = Fa
     return requests
 
 
+OPENROUTER_TEST_KEY = "sk-or-test-key-without-provider-credentials"
+GROK_MODEL = "x-ai/grok-4.20"
+
+
+def install_openrouter_mock(app) -> list[dict]:
+    """Drive the configured OpenRouter provider through a mock transport."""
+    from httpx import MockTransport
+
+    service = app.state.providers
+    original_build = service.build_client
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("Authorization") == f"Bearer {OPENROUTER_TEST_KEY}"
+        if request.url.path.endswith("/models"):
+            requests.append({"operation": "list_models"})
+            return httpx.Response(200, json={"data": [
+                {"id": REGISTRY["openrouter"].default_model},
+                {"id": GROK_MODEL},
+                {"id": "openai/tts-1"},
+                {"id": "x-ai/grok-4.20-voice"},
+            ]})
+        payload = json.loads(request.content or b"{}")
+        requests.append({
+            "operation": "chat", "model": payload.get("model"),
+            "stream": payload.get("stream"), "messages": payload.get("messages", []),
+        })
+        if payload.get("stream"):
+            return httpx.Response(200, content=_sse("Grok replies through OpenRouter."),
+                                  headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "VEDNIX_PROVIDER_OK"}}]})
+
+    def build_client(provider, row, *, settings, for_verification=False):
+        if provider != "openrouter":
+            return original_build(
+                provider, row, settings=settings, for_verification=for_verification
+            )
+        key = service._decrypt(row) if row else ""
+        if not key:
+            return None
+        http = httpx.AsyncClient(
+            transport=MockTransport(handler), base_url=REGISTRY["openrouter"].base_url,
+            timeout=httpx.Timeout(5.0),
+        )
+        client = OpenAICompatibleClient(
+            key, (row.model_override if row else None) or REGISTRY["openrouter"].default_model,
+            base_url=REGISTRY["openrouter"].base_url, provider_name="OpenRouter",
+            timeout=5.0, health_ttl=0.0,
+            static_models=list(REGISTRY["openrouter"].static_models),
+            supported_models=list(REGISTRY["openrouter"].static_models), client=http,
+        )
+        client._owns_client = True
+        return client
+
+    service.build_client = build_client
+    return requests
+
+
 def read_until(ws, terminal: str = "message_done") -> list[dict]:
     frames = []
     while True:
@@ -223,6 +281,54 @@ def test_gemini_end_to_end_provider_routes_and_websocket(settings):
         assert GEMINI_TEXT_MODELS[0] == GEMINI_DEFAULT_MODEL
 
 
+def test_openrouter_grok_key_verification_model_catalog_and_websocket(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        calls = install_openrouter_mock(client.app)
+        saved = client.put(
+            "/api/providers/openrouter/key", json={"api_key": OPENROUTER_TEST_KEY}
+        )
+        assert saved.status_code == 200, saved.text
+        assert OPENROUTER_TEST_KEY not in saved.text
+        assert saved.json()["has_key"] is True
+
+        verified = client.post("/api/providers/openrouter/verify")
+        assert verified.status_code == 200, verified.text
+        assert verified.json()["connected"] is True
+        assert verified.json()["enabled"] is True
+        assert verified.json()["verification_model"] == REGISTRY["openrouter"].default_model
+        assert OPENROUTER_TEST_KEY not in verified.text
+
+        configured = client.get("/api/providers")
+        row = next(item for item in configured.json()["providers"] if item["provider"] == "openrouter")
+        assert row["verified"] and row["enabled"] and row["has_key"]
+        assert OPENROUTER_TEST_KEY not in configured.text
+
+        catalog = client.get("/api/providers/catalog").json()
+        card = next(item for item in catalog["providers"] if item["id"] == "openrouter")
+        assert GROK_MODEL in card["models"]
+        models = client.get("/api/models", params={"provider": "openrouter"}).json()
+        assert models["chat_available"] and models["model_available"]
+        assert GROK_MODEL in models["available"]
+        assert "openai/tts-1" not in models["available"]
+        assert "x-ai/grok-4.20-voice" not in models["available"]
+
+        assert client.put(
+            "/api/providers/priority", json={"order": ["openrouter", "ollama"]}
+        ).status_code == 200
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({
+                "type": "user_message", "content": "hi", "provider": "openrouter",
+                "model": GROK_MODEL, "temperature": 0.0,
+            })
+            frames = read_until(ws)
+        reply = "".join(frame["content"] for frame in frames if frame["type"] == "token")
+        assert reply == "Grok replies through OpenRouter."
+        assert any(
+            call.get("model") == GROK_MODEL and call.get("stream") is True
+            for call in calls if call["operation"] == "chat"
+        )
+
+
 def test_gemini_verification_failure_is_safe_and_not_enabled(settings):
     with TestClient(create_app(settings=settings)) as client:
         install_gemini_mock(client.app, reject_key=True)
@@ -302,6 +408,7 @@ def test_selected_gemini_failure_is_reported_and_disables_provider(settings):
 
 def test_credentialed_cors_uses_exact_vercel_origin(settings):
     production_origin = "https://vednix.vercel.app"
+    assert production_origin in settings.cors_origins_list
     production = settings.model_copy(update={"cors_origins": production_origin})
     with TestClient(create_app(settings=production, llm_client=FakeLLM())) as client:
         allowed = client.options(
@@ -344,6 +451,17 @@ def test_gemini_model_setting_is_canonical_and_text_only():
     assert Settings(gemini_model=f"models/{GEMINI_DEFAULT_MODEL}").gemini_model == GEMINI_DEFAULT_MODEL
     with pytest.raises(ValueError, match="supported Gemini text-generation model"):
         Settings(gemini_model="models/lyria-realtime-exp")
+
+
+def test_cloud_provider_error_explains_payment_and_redacts_key():
+    from ai_engine.cloud_client import _provider_http_error
+
+    error = _provider_http_error(
+        "OpenRouter", httpx.Response(402, json={"error": {"message": OPENROUTER_TEST_KEY}}),
+        OPENROUTER_TEST_KEY,
+    )
+    assert "credits or billing balance" in str(error)
+    assert OPENROUTER_TEST_KEY not in str(error)
 
 
 def test_cloud_client_filters_google_non_text_and_rejects_lyria():

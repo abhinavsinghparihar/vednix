@@ -72,7 +72,12 @@ REGISTRY: dict[str, ProviderSpec] = {p.id: p for p in [
         "openrouter", "OpenRouter", "openai", "https://openrouter.ai/api/v1",
         "openai/gpt-oss-20b:free",
         "https://openrouter.ai/keys", "https://openrouter.ai/docs", True,
-        ("openai/gpt-oss-20b:free", "google/gemma-3-27b-it:free", "meta-llama/llama-3.3-70b-instruct:free"),
+        (
+            "openai/gpt-oss-20b:free",
+            "google/gemma-3-27b-it:free",
+            "meta-llama/llama-3.3-70b-instruct:free",
+            "x-ai/grok-4.20",
+        ),
         blurb="One key, hundreds of models — the easy cloud on-ramp.",
     ),
     ProviderSpec(

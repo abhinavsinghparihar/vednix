@@ -44,6 +44,8 @@ def _provider_http_error(provider: str, response: httpx.Response, api_key: str) 
     status = response.status_code
     if status in (401, 403):
         detail = "API key rejected or missing permission. Check the provider key and access."
+    elif status == 402:
+        detail = "Provider credits or billing balance are insufficient. Check the provider account and selected model's cost."
     elif status == 429:
         detail = "Provider rate limit or quota reached. Check the provider's quota and billing."
     elif status == 404:

@@ -263,13 +263,18 @@ class ResilientLLM:
             # its configured model; catalog/health requests need not probe the
             # provider over the network before a chat has been attempted.
             supports_model = getattr(pinned_client, "supports_model", lambda _model: True)
-            available = [default] if default and supports_model(default) else []
+            available = [
+                model for model in getattr(pinned_client, "_static_models", [])
+                if supports_model(model)
+            ]
+            if default and supports_model(default) and default not in available:
+                available.insert(0, default)
             self._active_label = getattr(pinned_client, "provider_name", "OpenRouter (env)")
             self._active_model = default
             error = self._pinned_error
             return self._cloud_catalog_result(
                 provider, default, available, True, self._pinned_verified, True,
-                bool(default and getattr(pinned_client, "supports_model", lambda _model: True)(default)), error,
+                bool(default and supports_model(default)), error,
             )
         configured = bool(row and (row.key_ciphertext or row.base_url_override))
         verified = bool(row and row.status == "connected" and row.verified_at is not None)
@@ -524,6 +529,8 @@ class ResilientLLM:
             raise OllamaError(await self.unavailable_message(provider))
 
         for name, client in targets:
+            label = getattr(client, "provider_name", ENGINE_LABEL)
+            self._active_label = label
             try:
                 if name == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
                     raise OllamaError(f"{ENGINE_LABEL} is not running.")
@@ -531,10 +538,10 @@ class ResilientLLM:
             except OllamaError as exc:
                 if provider is not None:
                     raise
-                errors.append(f"{getattr(client, 'provider_name', ENGINE_LABEL)}: {exc}")
+                errors.append(f"{label}: {exc}")
                 continue
 
-            label = getattr(client, "provider_name", ENGINE_LABEL)
+            self._active_model = effective_model
             started = False
             try:
                 async for chunk in client.chat_stream(

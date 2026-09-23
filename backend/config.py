@@ -128,11 +128,11 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins_list(self) -> list[str]:
-        """Return explicit local development origins plus configured origins.
+        """Return the canonical Vercel origin, local dev origins, and overrides.
 
-        Keep credentialed CORS allowlisted (never ``*``), while making an old
-        .env copied from a previous Vednix release safe when Next.js falls back
-        from port 3000 to 3001.
+        Keep credentialed CORS allowlisted (never ``*``). The stable production
+        Vercel origin is explicit; ``VEDNIX_CORS_ORIGINS`` adds custom or
+        preview deployments, and local ports preserve localhost development.
         """
         configured = [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
         for origin in configured:
@@ -151,11 +151,12 @@ class Settings(BaseSettings):
                     "VEDNIX_CORS_ORIGINS must contain exact http(s) origins; "
                     "wildcards and URL paths are not allowed with credentials."
                 )
-        local = [
+        built_in = [
+            "https://vednix.vercel.app",
             "http://localhost:3000", "http://127.0.0.1:3000",
             "http://localhost:3001", "http://127.0.0.1:3001",
         ]
-        return list(dict.fromkeys([*configured, *local]))
+        return list(dict.fromkeys([*configured, *built_in]))
 
     @property
     def vision_keywords_list(self) -> list[str]:

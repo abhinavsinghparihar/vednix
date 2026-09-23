@@ -66,9 +66,10 @@ origin is rejected rather than silently connecting.
 
 `NEXT_PUBLIC_API_BASE` must be the Render **backend origin**. The WebSocket
 base can be omitted because the frontend derives `wss://.../ws/chat` from that
-HTTPS API base, or set explicitly as shown. The production frontend no longer
-falls back to `127.0.0.1`; if the API URL is missing, it reports a configuration
-error instead of calling the visitor's computer.
+HTTPS API base, or set explicitly as shown. The repository's production default
+targets its configured Render backend; use these Vercel variables to override
+that default for another deployment. The frontend never falls back to the
+visitor's localhost in production.
 
 For Vercel-to-Render authentication, HTTPS refresh cookies use
 `SameSite=None; Secure`; the SPA bootstraps the double-submit CSRF nonce from

@@ -184,6 +184,8 @@ def test_catalog_exposes_ten_providers_without_secrets(settings):
                        "mistral", "together", "fireworks", "custom"}
         gemini = next(p for p in data if p["id"] == "gemini")
         assert gemini["key_url"].startswith("https://") and gemini["needs_key"] is True
+        openrouter = next(p for p in data if p["id"] == "openrouter")
+        assert "x-ai/grok-4.20" in openrouter["models"]
         assert not any("api_key" in p or "ciphertext" in p for p in data)
 
 
