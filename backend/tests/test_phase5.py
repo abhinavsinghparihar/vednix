@@ -258,7 +258,7 @@ def test_provider_switch_env_key_missing_falls_back_to_ollama(settings):
 
 
 def test_provider_switch_env_key_pins_openrouter_first(settings, monkeypatch):
-    """With a real env key, OpenRouter is pinned as candidate #1 and the
+    """With an environment key, OpenRouter is pinned as candidate #1 and the
     router's reported model/label reflect it (no network needed)."""
     cloud = settings.model_copy(
         update={"llm_provider": "openrouter", "openrouter_api_key": "sk-or-test-key"}
@@ -272,6 +272,60 @@ def test_provider_switch_env_key_pins_openrouter_first(settings, monkeypatch):
         assert health["chat_available"] is False
         models = client.get("/api/models", params={"provider": "openrouter"}).json()
         assert "x-ai/grok-4.20" in models["available"]
+
+
+def test_openrouter_env_key_pinned_path_streams_grok(settings, monkeypatch):
+    """The legacy environment-key route must accept a selected Grok model."""
+    model = "x-ai/grok-4.20"
+    api_key = "sk-or-pinned-test-key"
+    cloud = settings.model_copy(update={
+        "llm_provider": "openrouter",
+        "openrouter_api_key": api_key,
+        "openrouter_model": "openai/gpt-oss-20b:free",
+    })
+    requests: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content or b"{}")
+        assert request.headers.get("Authorization") == f"Bearer {api_key}"
+        requests.append(payload)
+        if payload.get("stream"):
+            return httpx.Response(
+                200,
+                content=_sse([json.dumps({"choices": [{"delta": {"content": "Grok via env key."}}]}), "[DONE]"]),
+                headers={"content-type": "text/event-stream"},
+            )
+        return httpx.Response(200, json={"choices": [{"message": {"content": "Conversation title"}}]})
+
+    original_async_client = httpx.AsyncClient
+
+    def mock_openrouter_client(*args, **kwargs):
+        if kwargs.get("base_url") == cloud.openrouter_base_url:
+            kwargs["transport"] = httpx.MockTransport(handler)
+        return original_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", mock_openrouter_client)
+    with TestClient(create_app(settings=cloud)) as client:
+        models = client.get("/api/models", params={"provider": "openrouter"}).json()
+        assert model in models["available"]
+        assert models["chat_available"] is False  # no successful generation yet
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({
+                "type": "user_message", "content": "hi", "provider": "openrouter",
+                "model": model, "temperature": 0.0,
+            })
+            frames = []
+            for _ in range(80):
+                frame = ws.receive_json()
+                frames.append(frame)
+                if frame.get("type") in {"message_done", "error"}:
+                    break
+        assert "".join(frame.get("content", "") for frame in frames if frame["type"] == "token") == "Grok via env key."
+        assert any(request.get("model") == model and request.get("stream") is True for request in requests)
+        health = client.get("/api/health").json()
+        assert health["provider_verified"] is True
+        assert health["chat_available"] is True
+        assert api_key not in client.get("/api/health").text
 
 
 # --- internet research through the WS pipeline -------------------------------------
