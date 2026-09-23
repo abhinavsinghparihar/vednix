@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { api, WS_URL, type ConversationSummary, type UploadedFileMeta } from "@/lib/api";
+import { API_BASE_CONFIGURED } from "@/lib/config";
 import { getAccessToken } from "@/lib/tokenVault";
 import { WSClient, type CoreStateName, type Language, type ServerFrame, type WSStatus } from "@/lib/ws";
 import { tts } from "@/lib/tts";
@@ -56,6 +57,8 @@ interface ChatStore {
   wsStatus: WSStatus;
   coreState: CoreStateName;
   ollamaAvailable: boolean;
+  chatAvailable: boolean;
+  providerError: string | null;
   generating: boolean;
 
   // internet research (Phase 5) & multi-agent loop (Phase 6)
@@ -113,6 +116,7 @@ let ws: WSClient | null = null;
 let wsToken: string | null = null;
 let streamingId: string | null = null;
 let ttsWired = false;
+let modelRequestSequence = 0;
 
 export const useChat = create<ChatStore>((set, get) => {
   if (!ttsWired && typeof window !== "undefined") {
@@ -222,7 +226,10 @@ export const useChat = create<ChatStore>((set, get) => {
   }
 
   function ensureWs(): WSClient | null {
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined" || !WS_URL) {
+      set({ wsStatus: "closed" });
+      return null;
+    }
     // A WebSocket upgrade cannot carry an Authorization header. The session
     // token is therefore part of the URL, and the socket must be rebuilt when
     // login/refresh changes it. Never retain an anonymous socket after auth.
@@ -232,7 +239,10 @@ export const useChat = create<ChatStore>((set, get) => {
       ws = null;
       wsToken = null;
     }
-    if (ws) return ws;
+    if (ws) {
+      if (!ws.isOpen) ws.connect(); // bounded reconnect; a user retry restarts the attempt
+      return ws;
+    }
     const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
     wsToken = token;
     ws = new WSClient(url, handleFrame, (status) => set({ wsStatus: status }));
@@ -250,7 +260,9 @@ export const useChat = create<ChatStore>((set, get) => {
 
     wsStatus: "connecting",
     coreState: "IDLE",
-    ollamaAvailable: true,
+    ollamaAvailable: false,
+    chatAvailable: false,
+    providerError: null,
     generating: false,
 
     voiceState: "idle",
@@ -264,8 +276,24 @@ export const useChat = create<ChatStore>((set, get) => {
     provider: "ollama",
     providerChoice: null,
     setProvider: (provider) => {
-      set({ providerChoice: provider, modelOptions: [], activeModel: null });
-      void api.models(provider).then((r) => set({ modelOptions: r.available.length ? r.available : [r.default], activeModel: r.default })).catch(() => undefined);
+      const requestId = ++modelRequestSequence;
+      set({ providerChoice: provider, modelOptions: [], activeModel: null, providerError: null });
+      void api.models(provider).then((result) => {
+        if (requestId !== modelRequestSequence) return;
+        const choices = result.available ?? [];
+        set({
+          modelOptions: choices,
+          activeModel: choices.includes(result.default) ? result.default : choices[0] ?? null,
+          providerError: result.error ?? null,
+        });
+      }).catch((err) => {
+        if (requestId !== modelRequestSequence) return;
+        set({
+          modelOptions: [],
+          activeModel: null,
+          providerError: err instanceof Error ? err.message : "Could not load supported models.",
+        });
+      });
     },
     setVoiceState: (v) => set({ voiceState: v }),
     setVoiceReplies: (on) => {
@@ -337,18 +365,26 @@ export const useChat = create<ChatStore>((set, get) => {
           api.models(),
           api.listConversations(),
         ]);
-        const options = models.available.length ? models.available : [models.default];
+        const options = models.available ?? [];
         set({
           conversations,
           modelOptions: options,
-          activeModel: models.default,
+          activeModel: options.includes(models.default) ? models.default : options[0] ?? null,
           ollamaAvailable: health.ollama_available,
-          provider: health.provider ?? "ollama",
+          chatAvailable: health.chat_available ?? health.ollama_available,
+          providerError: models.error ?? null,
+          provider: health.provider ?? health.active_provider ?? "unavailable",
           loadingConversations: false,
         });
         ensureWs();
-      } catch {
-        set({ loadingConversations: false, ollamaAvailable: false, wsStatus: "closed" });
+      } catch (err) {
+        set({
+          loadingConversations: false,
+          ollamaAvailable: false,
+          chatAvailable: false,
+          wsStatus: "closed",
+          providerError: err instanceof Error ? err.message : "The Vednix backend is unreachable.",
+        });
       }
     },
 
@@ -397,7 +433,9 @@ export const useChat = create<ChatStore>((set, get) => {
             {
               id: `err-${Date.now()}`,
               role: "system",
-              content: "⚠️ Vednix backend is unreachable. Start it (`cd backend && python main.py`) — retrying in the background…",
+              content: API_BASE_CONFIGURED
+                ? "⚠️ The Vednix WebSocket backend is unreachable. Check the Render service and NEXT_PUBLIC_WS_BASE, then retry."
+                : "⚠️ The production backend URL is not configured. Set NEXT_PUBLIC_API_BASE and NEXT_PUBLIC_WS_BASE in Vercel, then redeploy.",
               plugins: [],
               streaming: false,
               error: true,
@@ -406,7 +444,7 @@ export const useChat = create<ChatStore>((set, get) => {
         });
         return;
       }
-      const { activeId, activeModel, temperature, internet, multiAgent, conversations } = get();
+      const { activeId, activeModel, temperature, internet, multiAgent, conversations, providerChoice } = get();
       const conv = conversations.find((c) => c.id === activeId);
       const prompt =
         text ||
@@ -428,7 +466,8 @@ export const useChat = create<ChatStore>((set, get) => {
         type: "user_message",
         content: prompt,
         conversation_id: activeId,
-        model: activeModel ?? conv?.model ?? null,
+        model: activeModel ?? (providerChoice ? null : conv?.model ?? null),
+        provider: providerChoice,
         temperature,
         attachments: drafts.map((d) => d.id),
         internet,

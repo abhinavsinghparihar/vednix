@@ -566,7 +566,12 @@ function ApiKeysPanel() {
   };
 
   const toggle = async (id: string, enabled: boolean) => {
-    await providerApi.toggle(id, enabled).catch(() => undefined);
+    try {
+      await providerApi.toggle(id, enabled);
+      setNotice(`${id}: ${enabled ? "enabled" : "disabled"}.`);
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not change provider state.");
+    }
     await load();
   };
 
@@ -684,7 +689,8 @@ function ApiKeysPanel() {
                       <Button variant="subtle" size="sm" onClick={() => void verify(p.id)} disabled={busy === p.id}>
                         Test
                       </Button>
-                      <Button variant="subtle" size="sm" onClick={() => void toggle(p.id, !row.enabled)}>
+                      <Button variant="subtle" size="sm" onClick={() => void toggle(p.id, !row.enabled)}
+                        disabled={!row.enabled && !(row.verified && row.status === "connected")}>
                         {row.enabled ? "Disable" : "Enable"}
                       </Button>
                       <Button variant="danger" size="sm" onClick={() => void remove(p.id)} disabled={busy === p.id}>

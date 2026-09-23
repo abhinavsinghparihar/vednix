@@ -251,8 +251,9 @@ def test_provider_switch_env_key_missing_falls_back_to_ollama(settings):
     cloud = settings.model_copy(update={"llm_provider": "openrouter", "openrouter_api_key": ""})
     with TestClient(create_app(settings=cloud)) as client:  # no llm injection → real wiring
         health = client.get("/api/health").json()
-        assert health["provider"] == "Vednix Engine"
-        assert health["ollama_available"] is False  # no ollama in the test env
+        assert health["provider"] == "unavailable"
+        assert health["ollama_available"] is False
+        assert health["chat_available"] is False  # no ollama in the test env
         assert health["default_model"] == cloud.ollama_model
 
 
@@ -264,8 +265,11 @@ def test_provider_switch_env_key_pins_openrouter_first(settings, monkeypatch):
     )
     with TestClient(create_app(settings=cloud)) as client:
         health = client.get("/api/health").json()
-        assert health["provider"] == "openrouter (env)"  # pinned label wins honestly
+        assert health["provider"] == "OpenRouter (env)"  # pinned label wins honestly
         assert health["default_model"] == cloud.openrouter_model
+        assert health["provider_configured"] is True
+        assert health["provider_verified"] is False
+        assert health["chat_available"] is False
 
 
 # --- internet research through the WS pipeline -------------------------------------

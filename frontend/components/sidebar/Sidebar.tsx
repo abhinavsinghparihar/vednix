@@ -91,8 +91,8 @@ function ConversationRow({ conv, active }: { conv: ConversationSummary; active: 
 }
 
 export function Sidebar() {
-  const { conversations, activeId, newChat, loadingConversations, wsStatus, ollamaAvailable, sidebarOpen, provider } = useChat();
-  const providerLabel = provider === "openrouter" ? "OpenRouter" : "Engine";
+  const { conversations, activeId, newChat, loadingConversations, wsStatus, chatAvailable, sidebarOpen, provider } = useChat();
+  const providerLabel = provider || "No provider";
   const [query, setQuery] = useState("");
 
   const filtered = useMemo(() => {
@@ -177,8 +177,8 @@ export function Sidebar() {
               />
               {wsStatus === "open" ? "Backend live" : wsStatus === "connecting" ? "Connecting…" : "Backend offline"}
             </span>
-            <span className={cn(ollamaAvailable ? "text-gold/80" : "text-red-300/80")}>
-              {providerLabel} {ollamaAvailable ? "✓" : "✕"}
+            <span className={cn(chatAvailable ? "text-gold/80" : "text-red-300/80")}>
+              {providerLabel} {chatAvailable ? "✓" : "✕"}
             </span>
           </div>
           <div className="mt-2.5 flex justify-center pb-0.5">

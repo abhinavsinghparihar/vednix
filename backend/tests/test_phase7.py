@@ -222,27 +222,29 @@ def test_priority_reorder(settings):
         assert set(order) == set(client.get("/api/providers").json()["priority"])
 
 
-async def test_verify_marks_row_connected_with_mocked_transport(db, settings):
-    from core.crypto import KeyVault
+async def test_verify_marks_row_connected_with_mocked_transport(db, settings, monkeypatch):
     from services.providers import ProviderService
 
     service = ProviderService(db[1], KeyVault(b"s" * 48))
     await service.upsert_key("gemini", api_key="AIza-test")
 
-    async def fake_list(self):
-        return ["gemini-2.0-flash", "gemini-1.5-pro"]
+    async def fake_chat(self, messages, temperature, *, model=None, images=None):
+        assert model == settings.gemini_model
+        return "VEDNIX_PROVIDER_OK"
 
-    original = OpenAICompatibleClient.list_models
-    OpenAICompatibleClient.list_models = fake_list
-    try:
-        result = await service.verify("gemini", settings=settings)
-    finally:
-        OpenAICompatibleClient.list_models = original
+    async def fake_list(self):
+        return [settings.gemini_model]
+
+    monkeypatch.setattr(OpenAICompatibleClient, "chat", fake_chat)
+    monkeypatch.setattr(OpenAICompatibleClient, "list_models", fake_list)
+    result = await service.verify("gemini", settings=settings)
 
     assert result["connected"] is True
-    assert result["models"] == ["gemini-2.0-flash", "gemini-1.5-pro"]
+    assert result["enabled"] is True
+    assert result["verification_model"] == settings.gemini_model
+    assert result["models"] == [settings.gemini_model]
     row = await service._row("gemini")
-    assert row.status == "connected" and row.verified_at is not None
+    assert row.status == "connected" and row.verified_at is not None and row.enabled
 
     # ollama down in the test env ⇒ a clean negative, not a crash
     down = await service.verify("ollama", settings=settings)
@@ -281,17 +283,25 @@ class _FakeCloud:
 
 
 async def test_router_fails_over_with_visible_handoff(db, settings):
-    from core.crypto import KeyVault
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from memory.models import ProviderKey
     from services.providers import ProviderService
 
     service = ProviderService(db[1], KeyVault(b"s" * 48))
     await service.upsert_key("gemini", api_key="AIza-test")
+    async with db[1]() as session:
+        row = (await session.execute(select(ProviderKey).where(ProviderKey.provider == "gemini"))).scalar_one()
+        row.status = "connected"
+        row.enabled = True
+        row.verified_at = datetime.now(timezone.utc)
+        await session.commit()
     real_build = service.build_client
     service.build_client = lambda provider, row, *, settings: _FakeCloud() if provider != "ollama" else real_build(provider, row, settings=settings)
 
     router = ResilientLLM(FakeLLM(offline=True), service, settings)
     chunks = [chunk async for chunk in router.chat_stream([{"role": "user", "content": "hi"}], 0.5)]
-    assert chunks[0].startswith("⚡ Vednix Engine unreachable — answered by **Google Gemini**")
+    assert chunks[0].startswith("⚡ Earlier provider unavailable — answered by **Google Gemini**")
     assert "".join(chunks[1:]) == "cloud answer"
     assert router.active_label == "Google Gemini"
 
@@ -304,7 +314,7 @@ async def test_router_all_providers_down_gives_actionable_error(db, settings):
     router = ResilientLLM(FakeLLM(offline=True), service, settings)
     with pytest.raises(OllamaError) as excinfo:
         [chunk async for chunk in router.chat_stream([{"role": "user", "content": "hi"}], 0.5)]
-    assert "No AI provider is reachable" in str(excinfo.value)
+    assert "No verified AI provider could answer" in str(excinfo.value)
     assert "Settings → AI Providers" in str(excinfo.value)
 
 

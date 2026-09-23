@@ -43,7 +43,7 @@ function StatCard({ label, value, sub, icon: Icon, delay }: {
 export function DashboardView() {
   const {
     conversations, selectConversation, newChat, setView,
-    modelOptions, activeModel, ollamaAvailable, coreState,
+    modelOptions, activeModel, chatAvailable, coreState,
   } = useChat();
   const [memoryCount, setMemoryCount] = useState<number | null>(null);
   const [docCount, setDocCount] = useState<number | null>(null);
@@ -82,8 +82,8 @@ export function DashboardView() {
         </h1>
         <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted">
           Vednix is{" "}
-          <span className={cn("font-semibold", ollamaAvailable ? "text-gold-bright" : "text-danger")}>
-            {ollamaAvailable ? "live and local" : "backend not reachable"}
+          <span className={cn("font-semibold", chatAvailable ? "text-gold-bright" : "text-danger")}>
+            {chatAvailable ? "chat provider ready" : "no verified chat provider"}
           </span>
           . Pick up where you left off, or start something new.
         </p>

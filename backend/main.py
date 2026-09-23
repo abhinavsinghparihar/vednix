@@ -14,6 +14,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -67,6 +69,7 @@ def _build_llm(settings: Settings, providers: ProviderService):
                 timeout=settings.llm_request_timeout,
                 health_ttl=settings.llm_health_ttl,
                 static_models=[settings.openrouter_model],
+                supported_models=[settings.openrouter_model],
             ),
         )
     return ResilientLLM(ollama, providers, settings, pinned=pinned)
@@ -147,6 +150,16 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             logger.info("Vednix AI backend stopped")
 
     app = FastAPI(title="Vednix AI", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        # Pydantic can include the invalid input in its 422 payload. Provider
+        # keys must not echo back, including malformed/oversized key requests.
+        errors = exc.errors()
+        if request.url.path.startswith("/api/providers/") and request.url.path.endswith("/key"):
+            errors = [{key: value for key, value in error.items() if key != "input"} for error in errors]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
     # Session gate (Phase 7): open while ZERO accounts exist; locks to JWT
     # the moment somebody registers. Middle of the stack so CORS preflight
     # never meets a 401.
@@ -159,8 +172,8 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-Requested-With"],
         # httpOnly refresh cookie must cross the dev origin boundary
         # (localhost:3000 → :8000). Explicit origins above are required
         # for credentials mode (wildcard would be rejected).

@@ -1,16 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono, Noto_Sans_Devanagari, Outfit } from "next/font/google";
+import "@fontsource-variable/inter";
+import "@fontsource-variable/outfit";
+import "@fontsource-variable/jetbrains-mono";
+import "@fontsource/noto-sans-devanagari/devanagari.css";
 import { BootGate } from "@/components/brand/BootGate";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "swap" });
-const outfit = Outfit({ subsets: ["latin"], variable: "--font-outfit", display: "swap" });
-const jbMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-jbmono", display: "swap" });
-const notoDev = Noto_Sans_Devanagari({
-  subsets: ["devanagari"],
-  variable: "--font-noto-dev",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "Vednix AI — The Next Generation AI Workspace",
@@ -37,9 +31,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           }}
         />
       </head>
-      <body
-        className={`${inter.variable} ${outfit.variable} ${jbMono.variable} ${notoDev.variable} antialiased`}
-      >
+      <body className="antialiased">
         <BootGate />
         {children}
       </body>

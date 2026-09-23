@@ -53,25 +53,53 @@ async def system_status(request: Request, core=Depends(get_core), memory=Depends
     running: list[dict] = []
     if hasattr(core.llm, "ollama_ps"):
         running = await core.llm.ollama_ps()
+    if hasattr(core.llm, "status_snapshot"):
+        provider_state = await core.llm.status_snapshot()
+        ollama_state = provider_state.get("ollama", {})
+    else:
+        try:
+            local_running = await core.llm.is_available()
+        except Exception:
+            local_running = False
+        ollama_state = {
+            "running": local_running,
+            "models": [],
+            "default_model": core.llm.model,
+            "model_available": local_running,
+            "chat_available": local_running,
+        }
+        provider_state = {
+            "backend_online": True, "chat_available": local_running,
+            "provider_configured": True, "provider_verified": local_running,
+            "model_available": local_running, "providers": [],
+            "active_provider": getattr(core.llm, "active_label", settings.llm_provider),
+            "active_model": core.llm.model,
+        }
     return {
         "db_bytes": db_bytes,
         "uploads_bytes": _dir_size(Path(settings.upload_dir)),
         "counts": await memory.stats(),
         "cpu": {"cores": os.cpu_count() or 0, "load1": load1},
+        "backend_online": bool(provider_state.get("backend_online", True)),
+        "chat_available": bool(provider_state.get("chat_available", False)),
+        "provider_configured": bool(provider_state.get("provider_configured", False)),
+        "provider_verified": bool(provider_state.get("provider_verified", False)),
+        "model_available": bool(provider_state.get("model_available", False)),
+        "providers": provider_state.get("providers", []),
         "ollama": {
-            "running": await core.llm.is_available(),
+            **ollama_state,
             "models_running": running,
             "host": settings.ollama_host,
         },
-        "active_provider": getattr(core.llm, "active_label", settings.llm_provider),
-        "default_model": core.llm.model,
+        "active_provider": provider_state.get("active_provider", getattr(core.llm, "active_label", settings.llm_provider)),
+        "default_model": provider_state.get("active_model", core.llm.model),
     }
 
 
 @router.get("/providers/ollama/default-model")
 async def get_default_model(core=Depends(get_core), providers=Depends(get_providers)) -> dict:
     saved = await providers.get_ollama_default()
-    return {"model": saved or core.llm.model, "saved": bool(saved)}
+    return {"model": saved or core.settings.ollama_model, "saved": bool(saved)}
 
 
 @router.put("/providers/ollama/default-model")

@@ -3,8 +3,8 @@
  *   1. What/why (honest pros, cons, hardware math, model catalog with specs)
  *   2. Download (official site, per-OS cards — browsers can't auto-install)
  *   3. Install guide (animated steps + copy chips: ollama serve, ollama pull)
- *   4. Connect (auto-detect @ localhost:11434, green-check animation, model
- *      picker persisted via /api/providers/ollama/default-model)
+ *   4. Connect (checks the backend-configured Ollama endpoint, bounded polling,
+ *      model picker persisted via /api/providers/ollama/default-model)
  *   5. Done (AI Ready → Launch Workspace)
  */
 
@@ -20,6 +20,7 @@ import {
   onboardingApi, providerApi, systemApi, type LocalModelRec, type OnboardingStatus,
 } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
+import { API_BASE, API_BASE_CONFIGURED } from "@/lib/config";
 import { Button } from "@/components/ui/primitives";
 import { cn, EASE_CURVE } from "@/lib/utils";
 import { CopyChip, SpecChip, StatusDot, StepTitle, usePoller } from "./shared";
@@ -33,7 +34,7 @@ const OS_CARDS = [
 ];
 
 const PROS = [
-  { icon: Lock, text: "100% private — prompts never leave this machine" },
+  { icon: Lock, text: "Prompts stay local when Vednix and Ollama run on this computer" },
   { icon: WifiOff, text: "No internet needed once models are installed" },
   { icon: ShieldCheck, text: "Free & unlimited — no keys, no quotas, no bills" },
   { icon: Cpu, text: "Qwen · Llama · Gemma · Mistral · DeepSeek · Phi — your pick" },
@@ -53,7 +54,7 @@ function ExplainStep({ next, models }: { next: () => void; models: LocalModelRec
       <StepTitle
         kicker="Local mode · step 1 of 4"
         title="Meet the Vednix Engine"
-        sub="A tiny engine that runs open AI models right on this computer (built on the open Ollama runtime). Vednix talks to it, you own everything."
+        sub="A small local AI engine built on Ollama. The Vednix backend must be able to reach it; when both run on this computer, your prompts and models stay here."
       />
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -208,30 +209,51 @@ function InstallStep({ next, back, selectedModel }: { next: () => void; back: ()
   );
 }
 
-/* --- step 4: connect (auto-detect + model select) ---------------------------------------- */
+/* --- step 4: connect (backend-side detection + model select) ------------------------------ */
+
+type BackendReachability = "checking" | "local" | "remote" | "unconfigured";
+
+function backendReachability(): BackendReachability {
+  if (!API_BASE_CONFIGURED) return "unconfigured";
+  try {
+    const hostname = new URL(API_BASE).hostname.toLowerCase();
+    return ["localhost", "127.0.0.1", "::1"].includes(hostname) ? "local" : "remote";
+  } catch {
+    return "unconfigured";
+  }
+}
 
 function ConnectStep({
-  next, back, status, setStatus, selectedModel, setSelectedModel,
+
+  next, back, setStatus, selectedModel, setSelectedModel,
 }: {
   next: () => void;
   back: () => void;
-  status: OnboardingStatus | null;
   setStatus: (s: OnboardingStatus) => void;
   selectedModel: string;
   setSelectedModel: (m: string) => void;
 }) {
   const [models, setModels] = useState<string[]>([]);
+  const [serverRunning, setServerRunning] = useState(false);
+  const [backendKind, setBackendKind] = useState<BackendReachability>("checking");
   const [checking, setChecking] = useState(true);
+  const [polling, setPolling] = useState(true);
+  const [pollAttempts, setPollAttempts] = useState(0);
   const [detail, setDetail] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => setBackendKind(backendReachability()), []);
 
   const probe = useCallback(async () => {
     try {
       const res = await providerApi.ollamaStatus();
       setChecking(false);
       setDetail(res.detail);
+      setServerRunning(res.running);
       setModels(res.models);
+      if (res.running || pollAttempts + 1 >= 8) setPolling(false);
+      else setPollAttempts((attempts) => attempts + 1);
       if (res.running && res.models.length && !res.models.includes(selectedModel)) {
         setSelectedModel(res.models[0]);
       }
@@ -239,14 +261,18 @@ function ConnectStep({
       setStatus(ob);
     } catch {
       setChecking(false);
+      setServerRunning(false);
       setModels([]);
       setDetail("backend unreachable");
+      if (pollAttempts + 1 >= 8) setPolling(false);
+      else setPollAttempts((attempts) => attempts + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedModel]);
+  }, [selectedModel, pollAttempts]);
 
-  usePoller(probe, 2500);
-  const running = models.length > 0 || (status?.ollama_running ?? false);
+  usePoller(probe, 2500, polling);
+  // A reachable Ollama server without an installed model is not chat-ready.
+  const running = models.length > 0;
 
   const saveAndContinue = async () => {
     setSaving(true);
@@ -265,7 +291,13 @@ function ConnectStep({
       <StepTitle
         kicker="Local mode · step 4 of 4"
         title="Connecting…"
-        sub="Vednix probes localhost:11434 every few seconds — install the Engine and this card turns green by itself."
+        sub={backendKind === "remote"
+          ? "This browser uses a hosted backend. It checks Ollama where that backend runs; Render cannot reach Ollama on your Windows PC."
+          : backendKind === "unconfigured"
+            ? "The frontend has no backend URL configured. Set NEXT_PUBLIC_API_BASE in the deployment settings before connecting local or cloud AI."
+            : backendKind === "local"
+              ? "Vednix checks the Ollama endpoint configured on this local backend (localhost:11434 by default)."
+              : "Checking the configured backend and Ollama connection…"}
       />
 
       <motion.div
@@ -283,7 +315,7 @@ function ConnectStep({
             <StatusDot tone={running ? "ok" : "fail"} pulse={running} />
           )}
           <span className={cn("font-display text-xl font-bold", running ? "text-emerald-300" : "text-cream")}>
-            {running ? "Connected" : checking ? "Looking for the engine…" : "Not detected yet"}
+            {running ? "Connected · model ready" : checking ? "Looking for the engine…" : serverRunning ? "Engine running · model needed" : "Not detected yet"}
           </span>
         </div>
 
@@ -322,17 +354,28 @@ function ConnectStep({
         ) : (
           <div className="space-y-3">
             <p className="text-[13px] text-muted">
-              {checking ? "Give it a few seconds after ollama serve…" : "Troubleshooting"}
+              {checking ? "Checking the configured Ollama server…" : serverRunning ? "Ollama is reachable, but no model is installed yet." : "Troubleshooting"}
             </p>
-            {!checking && (
+            {!checking && (backendKind === "remote" ? (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-lg space-y-2 text-left">
+                <p className="rounded-xl border border-gold/20 bg-gold/[0.06] px-4 py-3 text-[12px] leading-relaxed text-muted">
+                  The hosted backend can only see Ollama inside its own server, not on this computer. Go back and choose Cloud AI, or run both the Vednix backend and Ollama locally. This status is not a connection to your PC.
+                </p>
+                {detail && <p className="text-center font-mono text-[10px] text-faint/70">{detail}</p>}
+              </motion.div>
+            ) : backendKind === "unconfigured" ? (
+              <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-lg text-[12px] leading-relaxed text-muted">
+                Set NEXT_PUBLIC_API_BASE to your backend origin in the frontend deployment settings, then redeploy. No local Ollama connection has been made.
+              </motion.p>
+            ) : (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-sm space-y-2 text-left">
-                <CopyChip text="ollama serve" label="start the engine" />
+                <CopyChip text="ollama serve" label="start the engine on this computer" />
                 <CopyChip text={`ollama pull ${selectedModel}`} label="fetch the model" />
                 {detail && <p className="text-center font-mono text-[10px] text-faint/70">{detail}</p>}
               </motion.div>
-            )}
+            ))}
             <div className="flex justify-center gap-2">
-              <Button variant="subtle" size="sm" onClick={() => { setChecking(true); void probe(); }}>
+              <Button variant="subtle" size="sm" onClick={() => { setPollAttempts(0); setPolling(true); setChecking(true); }}>
                 <RefreshCw className="h-3.5 w-3.5" /> Retry now
               </Button>
             </div>
@@ -355,9 +398,8 @@ function ConnectStep({
 /* --- orchestrator ------------------------------------------------------------------- */
 
 export function OllamaWizard({
-  status, setStatus, onDone, onExit,
+  setStatus, onDone, onExit,
 }: {
-  status: OnboardingStatus | null;
   setStatus: (s: OnboardingStatus) => void;
   onDone: () => void;
   onExit: () => void;
@@ -375,7 +417,7 @@ export function OllamaWizard({
     <DownloadStep key="download" next={() => setStep(2)} back={() => setStep(0)} />,
     <InstallStep key="install" next={() => setStep(3)} back={() => setStep(1)} selectedModel={selectedModel} />,
     <ConnectStep
-      key="connect" status={status} setStatus={setStatus}
+      key="connect" setStatus={setStatus}
       selectedModel={selectedModel} setSelectedModel={setSelectedModel}
       next={onDone} back={() => setStep(2)}
     />,

@@ -14,6 +14,7 @@ app_settings (priority order).
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from typing import AsyncIterator
@@ -23,12 +24,19 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ai_engine.cloud_client import AnthropicClient, CloudProviderError, OpenAICompatibleClient
+from ai_engine.model_catalog import GEMINI_DEFAULT_MODEL, GEMINI_TEXT_MODELS, normalize_gemini_model
 from ai_engine.ollama_client import OllamaClient, OllamaError
 from core.crypto import KeyVault
 from core.logging import get_logger
 from memory.models import AppSetting, ProviderKey
 
 logger = get_logger(__name__)
+
+_LEGACY_SECRET_PATTERNS = (
+    re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
+    re.compile(r"(?:sk|rk)-[0-9A-Za-z_-]{16,}"),
+    re.compile(r"(?:gsk_|or-v1-)[0-9A-Za-z_-]{16,}"),
+)
 
 
 # --------------------------------------------------------------------------
@@ -70,10 +78,10 @@ REGISTRY: dict[str, ProviderSpec] = {p.id: p for p in [
     ProviderSpec(
         "gemini", "Google Gemini", "openai",
         "https://generativelanguage.googleapis.com/v1beta/openai",
-        "gemini-2.5-flash",
+        GEMINI_DEFAULT_MODEL,
         "https://aistudio.google.com/apikey", "https://ai.google.dev/gemini-api/docs", True,
-        ("gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash"),
-        blurb="Fast and generous free tier from Google AI Studio.",
+        GEMINI_TEXT_MODELS,
+        blurb="Google Gemini text generation via its OpenAI-compatible chat API.",
     ),
     ProviderSpec(
         "groq", "Groq", "openai", "https://api.groq.com/openai/v1",
@@ -132,12 +140,13 @@ DEFAULT_PRIORITY: list[str] = [
 ]
 
 
-def provider_catalog() -> list[dict]:
-    """Registry projected for the setup wizard (no secrets involved)."""
+def provider_catalog(settings=None) -> list[dict]:
+    """Registry projected for the setup wizard (no keys or ciphertext)."""
     return [
         {
             "id": p.id, "label": p.label, "kind": p.kind, "needs_key": p.needs_key,
-            "default_model": p.default_model, "key_url": p.key_url, "docs_url": p.docs_url,
+            "default_model": settings.gemini_model if p.id == "gemini" and settings else p.default_model,
+            "key_url": p.key_url, "docs_url": p.docs_url,
             "vision": p.vision, "models": list(p.static_models), "blurb": p.blurb,
             "base_url": p.base_url,
         }
@@ -168,16 +177,28 @@ class ProviderService:
         out.sort(key=lambda d: priority.index(d["provider"]) if d["provider"] in priority else 99)
         return out
 
-    @staticmethod
-    def _public(r: ProviderKey, spec: ProviderSpec | None, priority: list[str]) -> dict:
+    def _safe_status_detail(self, row: ProviderKey) -> str | None:
+        detail = " ".join(str(row.status_detail or "").split())
+        if not detail:
+            return None
+        key = self._decrypt(row)
+        if key:
+            detail = detail.replace(key, "[redacted]")
+        for pattern in _LEGACY_SECRET_PATTERNS:
+            detail = pattern.sub("[redacted]", detail)
+        return detail[:300] or None
+
+    def _public(self, r: ProviderKey, spec: ProviderSpec | None, priority: list[str]) -> dict:
         return {
             "provider": r.provider,
             "label": spec.label if spec else r.provider,
             "enabled": r.enabled,
+            "configured": bool(r.key_ciphertext or r.base_url_override),
             "has_key": bool(r.key_ciphertext),
             "key_hint": r.key_hint or None,
+            "verified": r.status == "connected" and r.verified_at is not None,
             "status": r.status,                      # unverified | connected | failed
-            "status_detail": r.status_detail or None,
+            "status_detail": self._safe_status_detail(r),
             "model_override": r.model_override,
             "base_url_override": r.base_url_override,
             "priority": priority.index(r.provider) if r.provider in priority else None,
@@ -191,28 +212,43 @@ class ProviderService:
         spec = REGISTRY.get(provider)
         if spec is None:
             raise ValueError(f"Unknown provider '{provider}'.")
-        if spec.needs_key and not api_key.strip():
-            raise ValueError(f"{spec.label} requires an API key.")
         base_url = (base_url or "").strip() or None
         if spec.kind == "custom" and not base_url:
-            raise ValueError("A custom endpoint needs its base URL (e.g. http://localhost:1234/v1).")
+            # An existing custom endpoint may be saved/tested without resending
+            # its URL; the DB value is checked below before rejecting.
+            pass
+        clean_model = (model or "").strip() or None
+        if clean_model and provider == "gemini":
+            clean_model = normalize_gemini_model(clean_model)
+        if clean_model and spec.static_models and clean_model not in spec.static_models:
+            raise ValueError(
+                f"{spec.label} model '{clean_model}' is not in the supported text-chat model list."
+            )
         async with self._sessions() as db:
             row = (
                 await db.execute(select(ProviderKey).where(ProviderKey.provider == provider))
             ).scalar_one_or_none()
+            if row is None and spec.needs_key and not api_key.strip():
+                raise ValueError(f"{spec.label} requires an API key.")
             if row is None:
-                row = ProviderKey(provider=provider)
+                row = ProviderKey(provider=provider, key_ciphertext="", enabled=False)
                 db.add(row)
+            if spec.kind == "custom" and not base_url and not row.base_url_override:
+                raise ValueError("A custom endpoint needs its base URL (e.g. http://localhost:1234/v1).")
             if api_key.strip():
                 key = api_key.strip()
                 row.key_ciphertext = self._vault.encrypt(key)
                 row.key_hint = KeyVault.fingerprint(key)
-            row.status = "unverified"
-            row.status_detail = ""
             if base_url is not None:
                 row.base_url_override = base_url
-            if model is not None and model.strip():
-                row.model_override = model.strip()
+            if clean_model is not None:
+                row.model_override = clean_model
+            # Any key/config save invalidates the prior verification. A provider
+            # is never routable until its text-generation check succeeds again.
+            row.enabled = False
+            row.status = "unverified"
+            row.status_detail = ""
+            row.verified_at = None
             await db.commit()
             priority = await self.get_priority()
             return self._public(row, spec, priority)
@@ -230,6 +266,11 @@ class ProviderService:
             ).scalar_one_or_none()
             if row is None:
                 return False
+            spec = REGISTRY.get(provider)
+            if enabled and (row.status != "connected" or row.verified_at is None):
+                raise ValueError("Verify this provider successfully before enabling it.")
+            if enabled and spec and spec.needs_key and not self._decrypt(row):
+                raise ValueError("The stored API key could not be decrypted. Save the key and verify again.")
             row.enabled = enabled
             await db.commit()
             return True
@@ -298,9 +339,12 @@ class ProviderService:
         except ValueError:
             return ""
 
-    def build_client(self, provider: str, row: ProviderKey | None, *, settings) -> "object | None":
-        """Construct a live LLM client for a provider row (or None when the
-        provider isn't usable: disabled, missing key, unknown id)."""
+    def build_client(
+        self, provider: str, row: ProviderKey | None, *, settings,
+        for_verification: bool = False,
+    ) -> "object | None":
+        """Build a provider client. Normal routing requires a successful,
+        current verification; ``for_verification`` is used only by the test call."""
         spec = REGISTRY.get(provider)
         if spec is None:
             return None
@@ -309,7 +353,7 @@ class ProviderService:
                 settings.ollama_host, settings.ollama_model,
                 timeout=settings.llm_request_timeout, health_ttl=settings.llm_health_ttl,
             )
-        if row is None or not row.enabled:
+        if row is None or (not for_verification and (not row.enabled or row.status != "connected")):
             return None
         api_key = self._decrypt(row)
         if spec.needs_key and not api_key:
@@ -317,288 +361,150 @@ class ProviderService:
         base_url = row.base_url_override or spec.base_url
         if not base_url:
             return None
-        model = row.model_override or spec.default_model
+        default_model = settings.gemini_model if provider == "gemini" else spec.default_model
+        model = row.model_override or default_model
+        model = normalize_gemini_model(model) if provider == "gemini" else model
+        # A legacy Gemini row can contain a realtime/music model saved by the
+        # old unfiltered selector. Never send that to a text chat endpoint.
+        if spec.static_models and model not in spec.static_models:
+            model = default_model
         cls = AnthropicClient if spec.kind == "anthropic" else OpenAICompatibleClient
         return cls(
             api_key, model or "default",
             base_url=base_url, provider_name=spec.label,
             timeout=settings.llm_request_timeout, health_ttl=settings.llm_health_ttl,
-            static_models=list(spec.static_models), vision=spec.vision,
+            static_models=list(spec.static_models),
+            supported_models=list(spec.static_models) if spec.static_models else None,
+            vision=spec.vision,
         )
 
+    async def mark_failed(self, provider: str, detail: str) -> None:
+        """Persist runtime failures without storing upstream secrets or bodies."""
+        if provider not in REGISTRY or provider == "ollama":
+            return
+        async with self._sessions() as db:
+            row = (
+                await db.execute(select(ProviderKey).where(ProviderKey.provider == provider))
+            ).scalar_one_or_none()
+            if row is not None:
+                row.status = "failed"
+                row.status_detail = " ".join(str(detail).split())[:300]
+                row.enabled = False
+                await db.commit()
+
     async def verify(self, provider: str, *, settings) -> dict:
-        """Real network proof: list one page of models. Marks the row
-        connected/failed — the row update is part of the contract (the
-        settings UI renders status from the row, not from this call)."""
+        """Prove the provider can perform text generation (not just list models).
+
+        Gemini verification intentionally uses the same configured model and
+        chat-completions endpoint as a real turn. Keys are only decrypted for
+        this backend-side call and are never included in the result.
+        """
         spec = REGISTRY.get(provider)
         if spec is None:
             raise ValueError(f"Unknown provider '{provider}'.")
         import datetime as _dt
 
-        detail, ok, models_preview = "", False, []
+        detail = ""
+        ok = False
+        result_enabled = False
+        models_preview: list[str] = []
+        verification_model: str | None = None
+        server_running: bool | None = None
+        row: ProviderKey | None = None
+        client = None
         if spec.kind == "ollama":
             client = self.build_client("ollama", None, settings=settings)
+            selected_model = await self.get_ollama_default() or settings.ollama_model
+            result_enabled = True
             try:
-                models_preview = await client.list_models()  # type: ignore[attr-defined]
-                ok = True
+                running = await client.is_available()  # type: ignore[attr-defined]
+                server_running = running
+                models_preview = await client.list_models() if running else []  # type: ignore[attr-defined]
+                ok = running and selected_model in models_preview
+                result_enabled = ok
+                verification_model = selected_model
+                if not running:
+                    detail = f"Ollama is unavailable at {settings.ollama_host}. Start it with `ollama serve`."
+                elif not ok:
+                    detail = f"Ollama is running, but `{selected_model}` is not installed. Run `ollama pull {selected_model}`."
             except OllamaError as exc:
                 detail = str(exc)
             finally:
                 await client.aclose()  # type: ignore[attr-defined]
         else:
             row = await self._row(provider)
-            if row is None or not row.key_ciphertext:
-                detail = "No API key stored yet."
+            if row is None or (spec.needs_key and not row.key_ciphertext):
+                detail = f"No {spec.label} API key is stored yet."
+            elif spec.kind == "custom" and not (row.base_url_override or "").strip():
+                detail = "No custom provider endpoint is configured."
             else:
-                client = self.build_client(provider, row, settings=settings)
+                client = self.build_client(provider, row, settings=settings, for_verification=True)
                 if client is None:
-                    detail = "Provider is disabled."
+                    detail = f"{spec.label} is not configured for text generation. Check its key and endpoint."
                 else:
+                    verification_model = getattr(client, "model", None)
                     try:
-                        models_preview = await client.list_models()  # type: ignore[attr-defined]
+                        probe = await client.chat(
+                            [{"role": "user", "content": "Reply with exactly: VEDNIX_PROVIDER_OK"}],
+                            0.0,
+                            model=verification_model,
+                        )  # type: ignore[attr-defined]
+                        if not str(probe).strip():
+                            raise CloudProviderError(f"{spec.label} returned an empty verification response.")
                         ok = True
+                        try:
+                            models_preview = await client.list_models()  # type: ignore[attr-defined]
+                        except CloudProviderError:
+                            # Text generation itself succeeded. If model listing
+                            # is restricted, expose only the model just verified.
+                            models_preview = []
+                        if verification_model:
+                            models_preview = [verification_model, *[
+                                m for m in models_preview if m != verification_model
+                            ]]
                     except CloudProviderError as exc:
-                        detail = f"{spec.label} API key verification failed: {exc}"
+                        detail = str(exc)
+                    except Exception as exc:
+                        # Do not return arbitrary exception strings (which may
+                        # include request configuration) to the browser.
+                        logger.warning("%s verification failed (%s)", provider, type(exc).__name__)
+                        detail = f"{spec.label} verification failed unexpectedly. Check the backend logs and provider settings."
                     finally:
                         await client.aclose()  # type: ignore[attr-defined]
+
             if row is not None:
                 async with self._sessions() as db:
                     db_row = await db.get(ProviderKey, row.id)
                     if db_row is not None:
+                        was_connected = db_row.status == "connected"
                         db_row.status = "connected" if ok else "failed"
                         db_row.status_detail = "" if ok else detail[:300]
-                        db_row.verified_at = (
-                            _dt.datetime.now(_dt.timezone.utc) if ok else db_row.verified_at
-                        )
+                        db_row.verified_at = _dt.datetime.now(_dt.timezone.utc) if ok else None
+                        if ok:
+                            # New/rotated keys are enabled after actual success;
+                            # a deliberately disabled, already-verified provider
+                            # stays disabled when someone merely re-tests it.
+                            if not was_connected:
+                                db_row.enabled = True
+                            if provider == "gemini" and verification_model:
+                                db_row.model_override = verification_model
+                        else:
+                            db_row.enabled = False
+                        result_enabled = bool(db_row.enabled)
+                        if row is not None:
+                            row.enabled = result_enabled
                         await db.commit()
         return {
-            "provider": provider, "connected": ok, "detail": "" if ok else detail,
-            "models": models_preview[:12],
+            "provider": provider,
+            "connected": ok,
+            "enabled": result_enabled,
+            "verified": ok,
+            "verification_model": verification_model,
+            "running": server_running if provider == "ollama" else None,
+            "model_available": ok,
+            "detail": "" if ok else detail,
+            "models": list(dict.fromkeys(models_preview))[:12],
         }
 
 
-# --------------------------------------------------------------------------
-# ResilientLLM — one LLMClient facade over the whole priority chain.
-# Engine, autotitle, vision routing and the model selector see ONE object.
-# --------------------------------------------------------------------------
-
-class ResilientLLM:
-    """Priority router with pre-first-token failover.
-
-    Fault model honored honestly: if a provider dies *before its first token*,
-    the turn moves to the next candidate and the user sees a one-line handoff
-    notice. A provider dying *mid-stream* cannot be replayed (partial text is
-    already on the user's screen) — that surfaces as the engine's standard
-    'reply hit an error' path.
-    """
-
-    def __init__(
-        self,
-        ollama: OllamaClient,
-        service: ProviderService,
-        settings,
-        pinned: tuple[str, object] | None = None,
-    ) -> None:
-        self._ollama = ollama
-        self._service = service
-        self._settings = settings
-        # env-forced first candidate (legacy VEDNIX_LLM_PROVIDER=openrouter path)
-        self._pinned = pinned
-        self._cloud_cache: dict[str, tuple[float, object]] = {}  # provider → (row version, client)
-        self._active_label = pinned[0] if pinned else ENGINE_LABEL
-        self.last_handoff: str | None = None  # one-line notice for the current turn
-
-    # -- client cache (rebuilt when a row's updated_at changes) -------------
-
-    @staticmethod
-    def _version(row: ProviderKey | None) -> float:
-        return row.updated_at.timestamp() if row and row.updated_at else 0.0
-
-    async def _client_for(self, provider: str) -> "object | None":
-        if provider == "ollama":
-            # honor the wizard's saved default model (survives restarts)
-            try:
-                default = await self._service.get_ollama_default()
-                if default:
-                    self._ollama.model = default
-            except Exception:
-                logger.exception("ollama default-model lookup failed (non-fatal)")
-            return self._ollama
-        row = await self._service._row(provider)
-        if row is None:
-            self._cloud_cache.pop(provider, None)
-            return None
-        version = self._version(row)
-        cached = self._cloud_cache.get(provider)
-        if cached and cached[0] == version:
-            return cached[1]
-        client = self._service.build_client(provider, row, settings=self._settings)
-        if cached:
-            try:
-                await cached[1].aclose()  # type: ignore[attr-defined]
-            except Exception:
-                pass
-            self._cloud_cache.pop(provider, None)
-        if client is not None:
-            self._cloud_cache[provider] = (version, client)
-        return client
-
-    async def _candidates(self, preferred: str | None = None) -> "list[tuple[str, object]]":
-        out: list[tuple[str, object]] = []
-        if self._pinned is not None:
-            out.append(self._pinned)
-        order = await self._service.get_priority()
-        for provider in order:
-            client = await self._client_for(provider)
-            if client is not None:
-                out.append((provider, client))
-        if preferred:
-            out.sort(key=lambda item: 0 if item[0] == preferred else 1)
-        return out
-
-    # -- LLMClient Protocol -----------------------------------------------------
-
-    @property
-    def model(self) -> str:
-        # the model the FIRST candidate would actually serve — health checks
-        # and the engine's vision decision read the truth, not a stale flag
-        if self._pinned is not None:
-            return getattr(self._pinned[1], "model", self._ollama.model)
-        return self._ollama.model
-
-    @property
-    def active_label(self) -> str:
-        return self._active_label
-
-    async def supports_images(self, model: str | None = None) -> bool:
-
-        """Would the FIRST candidate provider see images with this model?
-        Ollama answers via the settings keyword list; cloud clients know
-        their own registry flag. Engine duck-types this (stubs may omit it)."""
-        for provider, client in await self._candidates():
-            checker = getattr(client, "supports_images", None)
-            if checker is not None:
-                return bool(checker(model))
-            return self._settings.is_vision_model(model or self._ollama.model)
-        return self._settings.is_vision_model(model or self._ollama.model)
-
-    async def list_models(self, provider: str | None = None) -> list[str]:
-        """Uncached live list from the first reachable provider (the REST
-        /api/models contract — mirrors list_models_cached's routing)."""
-        for provider_name, client in await self._candidates(provider):
-            if provider_name == "ollama":
-                if await client.is_available():
-                    self._active_label = ENGINE_LABEL
-                    try:
-                        return await client.list_models()
-                    except OllamaError:
-                        continue
-            else:
-                self._active_label = getattr(client, "provider_name", provider_name)
-                try:
-                    return await client.list_models()
-                except OllamaError:
-                    return getattr(client, "_static_models", [])  # key fine, listing limited
-        raise OllamaError("No provider could list models.")
-
-    async def is_available(self) -> bool:
-        for provider, client in await self._candidates():
-            if provider == "ollama":
-                if await client.is_available():  # type: ignore[attr-defined]
-                    return True
-            else:
-                return True  # a configured, enabled cloud provider counts as available
-        return False
-
-    def apply_ollama_default_now(self, model: str) -> None:
-        """Live-apply the wizard's saved model without waiting for the next
-        turn's candidates rebuild (the Settings page confirms instantly)."""
-        self._ollama.model = model
-
-    async def ollama_ps(self) -> list[dict]:
-        """Currently-loaded Ollama models (/api/ps) — the Profile page's
-        CPU/GPU card reads VRAM residency from here. [] when unreachable."""
-        ps = getattr(self._ollama, "ps", None)
-        if ps is None:
-            return []
-        try:
-            return await ps()
-        except OllamaError:
-            return []
-
-    async def list_models_cached(self, ttl: float = 30.0) -> list[str]:
-        """Models the ACTIVE (first reachable) provider can actually serve —
-        the model selector only ever offers real choices."""
-        for provider, client in await self._candidates():
-            if provider == "ollama":
-                if await client.is_available():  # type: ignore[attr-defined]
-                    self._active_label = ENGINE_LABEL
-                    return await client.list_models_cached(ttl)  # type: ignore[attr-defined]
-            else:
-                self._active_label = getattr(client, "provider_name", provider)
-                return await client.list_models_cached()  # type: ignore[attr-defined]
-        return []
-
-    async def chat(self, messages: list[dict], temperature: float, *,
-                   model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> str:
-        errors: list[str] = []
-        for provider, client in await self._candidates(provider):
-            if provider == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
-                errors.append(f"{ENGINE_LABEL}: not running")
-                continue
-            try:
-                result = await client.chat(messages, temperature, model=model, images=images)  # type: ignore[attr-defined]
-                self._active_label = getattr(client, "provider_name", ENGINE_LABEL)
-                return result
-            except OllamaError as exc:
-                errors.append(f"{getattr(client, 'provider_name', provider)}: {exc}")
-                continue
-        raise OllamaError("All providers failed — " + "; ".join(errors)[:300])
-
-    async def chat_stream(self, messages: list[dict], temperature: float, *,
-                          model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> AsyncIterator[str]:
-        errors: list[str] = []
-        self.last_handoff = None
-        for provider, client in await self._candidates(provider):
-            if provider == "ollama" and not await client.is_available():  # type: ignore[attr-defined]
-                errors.append(f"{ENGINE_LABEL}: not running")
-                continue
-            label = getattr(client, "provider_name", ENGINE_LABEL)
-            started = False
-            try:
-                async for chunk in client.chat_stream(  # type: ignore[attr-defined]
-                    messages, temperature, model=model, images=images
-                ):
-                    if not started:
-                        started = True
-                        self._active_label = label
-                        if errors and label != ENGINE_LABEL:
-                            self.last_handoff = (
-                                f"⚡ Vednix Engine unreachable — answered by **{label}** instead.\n\n"
-                            )
-                            yield self.last_handoff
-                    yield chunk
-                return
-            except OllamaError as exc:
-                if started:
-                    raise  # mid-stream failure: replay would duplicate visible text
-                errors.append(f"{label}: {exc}")
-                continue
-        raise OllamaError(
-            "No AI provider is reachable. Start the Vednix Engine (ollama serve) or add a "
-            "cloud key in Settings → AI Providers. (" + "; ".join(errors)[:240] + ")"
-        )
-
-    async def aclose(self) -> None:
-        await self._ollama.aclose()
-        if self._pinned is not None:
-            try:
-                await self._pinned[1].aclose()  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        for _, client in self._cloud_cache.values():
-            try:
-                await client.aclose()  # type: ignore[attr-defined]
-            except Exception:
-                pass
-        self._cloud_cache.clear()
+from services.resilient_llm import ResilientLLM  # noqa: E402  (registry/service must load first)

@@ -46,10 +46,10 @@ class LLMClient(Protocol):
 
     model: str
 
-    async def is_available(self) -> bool: ...
+    async def is_available(self, provider: str | None = None) -> bool: ...
     async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None) -> str: ...
-    def chat_stream(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None) -> AsyncIterator[str]: ...
-    async def list_models_cached(self, ttl: float = 30.0) -> list[str]: ...
+    def chat_stream(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> AsyncIterator[str]: ...
+    async def list_models_cached(self, ttl: float = 30.0, provider: str | None = None) -> list[str]: ...
 
 
 @dataclass
@@ -157,14 +157,31 @@ class EngineSession:
             yield result
             return
 
-        # 3. LLM path. Offline notice is yielded but never persisted (♻️ original UX).
-        if not await self.core.llm.is_available():
+        # 3. LLM path. Separate provider-specific readiness from backend liveness;
+        # explicit Gemini selection must not be short-circuited by local Ollama.
+        availability = self.core.llm.is_available
+        try:
+            try:
+                ready = await availability(provider=provider)
+            except TypeError:  # compatibility with older injected/test clients
+                ready = await availability()
+        except Exception:
+            ready = False
+        if not ready:
             await self.state.set(CoreState.IDLE)
-            yield (
-                "I can't reach Ollama right now — try: `ollama serve` and "
-                f"`ollama pull {self.core.llm.model}`. Everything else in Vednix "
-                "keeps working offline."
-            )
+            reason = getattr(self.core.llm, "unavailable_message", None)
+            if reason is not None:
+                try:
+                    message = await reason(provider)
+                except Exception:
+                    message = "No verified AI provider is available. Check Settings → AI Providers."
+            else:
+                message = (
+                    "I can't reach Ollama right now — try: `ollama serve` and "
+                    f"`ollama pull {self.core.llm.model}`. Everything else in Vednix "
+                    "keeps working offline."
+                )
+            yield message
             return
 
         # 3w. Internet research (Phase 5/6): LangGraph agent over SearXNG. The final
@@ -208,7 +225,7 @@ class EngineSession:
 
         # 3a. Resolve file context + images, and route vision correctly.
         llm_user_content, images, routed_model, no_vision = await self._enrich_with_files(
-            text, attachments, model
+            text, attachments, model, provider=provider
         )
         if no_vision:
             await self.state.set(CoreState.IDLE)
@@ -278,8 +295,9 @@ class EngineSession:
                 chunks.append(chunk)
                 yield chunk
         except OllamaError as exc:
-            logger.warning("ollama stream failed (conv=%s): %s", self.conversation_id, exc)
-            yield "\n\n⚠️ The model hit an error and this reply was not saved. Detail was logged."
+            label = getattr(self.core.llm, "active_label", "AI provider")
+            logger.warning("LLM stream failed (provider=%s, conv=%s): %s", provider or label, self.conversation_id, exc)
+            yield f"\n\n⚠️ {label} could not complete this reply: {exc} This reply was not saved."
         except Exception:
             logger.exception("unexpected engine error (conv=%s)", self.conversation_id)
             yield "\n\n⚠️ Something unexpected went wrong. Detail was logged."
@@ -295,6 +313,7 @@ class EngineSession:
         text: str,
         attachments: list[AttachmentRef],
         requested_model: str | None,
+        *, provider: str | None = None,
     ) -> tuple[str, list[str], str | None, bool]:
         """Returns (llm_user_content, images_b64, routed_model, no_vision_model).
 
@@ -340,7 +359,10 @@ class EngineSession:
                 the keyword list — audit-compatible either way)."""
                 checker = getattr(self.core.llm, "supports_images", None)
                 if checker is not None:
-                    result = checker(m)
+                    try:
+                        result = checker(m, provider=provider)
+                    except TypeError:
+                        result = checker(m)
                     if inspect.isawaitable(result):
                         result = await result
                     if result:
@@ -350,7 +372,10 @@ class EngineSession:
             if await can_see(desired):
                 pass  # requested/default model can already see
             else:
-                available = await self.core.llm.list_models_cached()
+                try:
+                    available = await self.core.llm.list_models_cached(provider=provider)
+                except TypeError:
+                    available = await self.core.llm.list_models_cached()
                 vision_models = []
                 for m in available:
                     if await can_see(m):

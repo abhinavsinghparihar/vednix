@@ -31,7 +31,7 @@ const VERBS = ["Create.", "Research.", "Code.", "Think."];
 const MODES = [
   {
     id: "free" as const, icon: Cpu, title: "Free · Private · Unlimited", tag: "RECOMMENDED",
-    lines: ["100% private — nothing leaves this machine", "Powered by the Vednix Engine", "Guided 3-minute setup"],
+    lines: ["Private when backend and Ollama run locally", "Powered by the Vednix Engine", "Hosted Render cannot reach Ollama on your PC"],
   },
   {
     id: "cloud" as const, icon: Cloud, title: "Cloud AI", tag: null,
@@ -167,7 +167,6 @@ export default function OnboardingPage() {
 
       {stage === "wizard" && flow === "free" && (
         <OllamaWizard
-          status={status}
           setStatus={setStatus}
           onDone={() => setStage("done")}
           onExit={() => setStage("mode")}
@@ -196,9 +195,9 @@ export default function OnboardingPage() {
             className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
           >
-            {status?.active_provider
+            {status?.active_provider && status.active_provider !== "unavailable"
               ? `${status.active_provider} is live. Your workspace — dashboard, chat, knowledge, memory — is standing by.`
-              : "Your workspace — dashboard, chat, knowledge, memory — is standing by."}
+              : "No verified chat provider is available yet. Set up local Ollama or verify a cloud provider in Settings → AI Providers."}
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}

@@ -46,8 +46,18 @@ async def status(onboarding: OnboardingService = Depends(get_onboarding),
                  users=Depends(get_users), core=Depends(get_core)) -> dict:
     """Everything the wizard and the route guard need in ONE call."""
     state = await onboarding.status()
-    ollama_running = await core.llm.is_available()
-    active = getattr(core.llm, "active_label", "Vednix Engine")
+    if hasattr(core.llm, "ollama_available"):
+        ollama_running = await core.llm.ollama_available()
+    else:
+        ollama_running = await core.llm.is_available()
+    if hasattr(core.llm, "model_catalog"):
+        catalog = await core.llm.model_catalog()
+        active = (
+            getattr(core.llm, "active_label", catalog.get("provider"))
+            if catalog.get("chat_available") else "unavailable"
+        )
+    else:
+        active = getattr(core.llm, "active_label", "Vednix Engine")
     return {
         **state,
         "auth_enabled": await users.auth_enabled(),

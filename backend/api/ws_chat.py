@@ -47,9 +47,12 @@ class WSSender:
     def __init__(self, ws: WebSocket) -> None:
         self._ws = ws
         self._lock = asyncio.Lock()
+        self.closed = False
 
     async def send(self, payload: dict) -> None:
         async with self._lock:
+            if self.closed:
+                return
             await self._ws.send_json(payload)
 
 
@@ -144,6 +147,11 @@ async def _stream_reply(
 
 @router.websocket("/ws/chat")
 async def ws_chat(ws: WebSocket) -> None:
+    origin = ws.headers.get("origin")
+    settings = getattr(ws.app.state, "settings", None)
+    if origin and settings and origin.rstrip("/") not in settings.cors_origins_list:
+        await ws.close(code=1008, reason="Origin is not allowed.")
+        return
     await ws.accept()
     core: EngineCore = ws.app.state.core
     memory: MemoryService = ws.app.state.memory
@@ -153,6 +161,7 @@ async def ws_chat(ws: WebSocket) -> None:
     receiver = asyncio.create_task(_receiver(ws, queue))
     bucket = TokenBucket(rate=8, per_seconds=20.0)  # audit SC6: connection-level backpressure
     sessions: dict[str, EngineSession] = {}
+    title_tasks: set[asyncio.Task] = set()
     stream_task: asyncio.Task | None = None
 
     try:
@@ -234,24 +243,47 @@ async def ws_chat(ws: WebSocket) -> None:
 
                 message_id = uuid.uuid4().hex
                 first_exchange = (await memory.message_count(conv.id)) == 0
-                stream_task = asyncio.create_task(
-                    _stream_reply(
-                        session, sender, message_id, text,
-                        payload.model or conv.model, payload.temperature, attachment_refs,
-                        payload.internet, payload.multi_agent, payload.provider,
+                async def stream_and_schedule_title(
+                    session_for_message=session,
+                    message_id_for_message=message_id,
+                    conversation_id_for_message=conv.id,
+                    text_for_message=text,
+                    model_for_message=payload.model or conv.model,
+                    temperature_for_message=payload.temperature,
+                    attachments_for_message=attachment_refs,
+                    internet_for_message=payload.internet,
+                    multi_agent_for_message=payload.multi_agent,
+                    provider_for_message=payload.provider,
+                    is_first_exchange=first_exchange,
+                ):
+                    await _stream_reply(
+                        session_for_message, sender, message_id_for_message, text_for_message,
+                        model_for_message, temperature_for_message, attachments_for_message,
+                        internet_for_message, multi_agent_for_message, provider_for_message,
                     )
-                )
-                if first_exchange:
-                    stream_task.add_done_callback(
-                        lambda *_args, cid=conv.id, t=text: asyncio.create_task(
-                            _autotitle(core, memory, sender, cid, t)
+                    if is_first_exchange:
+                        title_task = asyncio.create_task(
+                            _autotitle(core, memory, sender, conversation_id_for_message, text_for_message)
                         )
-                    )
+                        title_tasks.add(title_task)
+                        title_task.add_done_callback(title_tasks.discard)
+
+                stream_task = asyncio.create_task(stream_and_schedule_title())
     finally:
         receiver.cancel()
         if stream_task and not stream_task.done():
             stream_task.cancel()
+        await asyncio.gather(receiver, *([stream_task] if stream_task else []), return_exceptions=True)
+        sender.closed = True
         try:
             await ws.close()
         except Exception:
             pass
+        if title_tasks:
+            # Preserve the best-effort title after a quick chat-backend call,
+            # but never hold a disconnected WebSocket worker open indefinitely.
+            _, pending_titles = await asyncio.wait(title_tasks, timeout=1.0)
+            for task in pending_titles:
+                task.cancel()
+            if pending_titles:
+                await asyncio.gather(*pending_titles, return_exceptions=True)

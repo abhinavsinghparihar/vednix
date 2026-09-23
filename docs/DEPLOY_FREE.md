@@ -27,7 +27,11 @@ VEDNIX_HOST=0.0.0.0
 VEDNIX_PORT=10000
 VEDNIX_CORS_ORIGINS=https://YOUR-VERCEL-DOMAIN.vercel.app
 VEDNIX_SEARXNG_URL=
-VEDNIX_OLLAMA_HOST=https://YOUR-OLLAMA-HOST
+# Render cannot reach Ollama on your Windows PC. This loopback URL is
+# intentionally local to the Render container and will report Ollama offline.
+VEDNIX_OLLAMA_HOST=http://127.0.0.1:11434
+VEDNIX_OLLAMA_MODEL=qwen2.5:3b
+VEDNIX_GEMINI_MODEL=gemini-3.8-flash
 VEDNIX_DATABASE_URL=postgresql+asyncpg://...
 ```
 
@@ -52,8 +56,31 @@ NEXT_PUBLIC_API_BASE=https://YOUR-RENDER-SERVICE.onrender.com
 NEXT_PUBLIC_WS_BASE=wss://YOUR-RENDER-SERVICE.onrender.com/ws/chat
 ```
 
-Redeploy after saving variables. Add the final Vercel URL to the backend
-`VEDNIX_CORS_ORIGINS` value.
+Redeploy after saving variables. Replace the placeholders with the real
+service/domain values from your Render and Vercel dashboards. Add the exact
+Vercel origin (scheme + hostname only, no path and no trailing wildcard) to
+`VEDNIX_CORS_ORIGINS`. It is comma-separated for multiple production/preview
+origins; credentialed CORS intentionally rejects `*`. The same exact origin
+allowlist protects `/ws/chat`, so a browser WebSocket from an unlisted Vercel
+origin is rejected rather than silently connecting.
+
+`NEXT_PUBLIC_API_BASE` must be the Render **backend origin**. The WebSocket
+base can be omitted because the frontend derives `wss://.../ws/chat` from that
+HTTPS API base, or set explicitly as shown. The production frontend no longer
+falls back to `127.0.0.1`; if the API URL is missing, it reports a configuration
+error instead of calling the visitor's computer.
+
+For Vercel-to-Render authentication, HTTPS refresh cookies use
+`SameSite=None; Secure`; the SPA bootstraps the double-submit CSRF nonce from
+`/api/auth/csrf` and holds it in memory. Browser privacy settings that block all
+cross-site cookies can still prevent refresh-cookie persistence; if that affects
+your users, use a same-site API hostname (for example, `api.YOUR-DOMAIN`) or a
+same-origin proxy. CORS cannot override a browser's third-party-cookie policy.
+
+Render cannot access Ollama on a developer's Windows PC. Keep the Render Ollama
+host at its container-local loopback address and let Vednix show it as
+unavailable; a verified cloud provider such as Gemini is then usable. For
+local development, the default remains `http://localhost:11434`.
 
 ### 3. Cloud provider
 

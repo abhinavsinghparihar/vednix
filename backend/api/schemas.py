@@ -70,6 +70,12 @@ class HealthOut(BaseModel):
     default_model: str
     assistant: str
     creator: str = "Abhinav Singh"
+    backend_online: bool = True
+    chat_available: bool = False
+    provider_configured: bool = False
+    provider_verified: bool = False
+    model_available: bool = False
+    active_provider: str | None = None
 
 
 # --- REST: uploads & knowledge (Phase 4) -----------------------------------------

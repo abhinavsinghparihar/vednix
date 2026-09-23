@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from ai_engine.model_catalog import GEMINI_DEFAULT_MODEL, GEMINI_TEXT_MODELS, normalize_gemini_model
 
 _BACKEND_ROOT = Path(__file__).resolve().parent
 
@@ -35,6 +38,10 @@ class Settings(BaseSettings):
     openrouter_api_key: str = ""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_model: str = "openai/gpt-oss-20b:free"
+    # Default text-generation model used by the Gemini OpenAI-compatible API.
+    # Override in Render with VEDNIX_GEMINI_MODEL; users can still store a
+    # provider-specific model override after verifying it.
+    gemini_model: str = GEMINI_DEFAULT_MODEL
 
     # --- Internet research (Phase 5): SearXNG, self-hostable = offline-creed ---
     searxng_url: str = "http://localhost:8080"
@@ -93,6 +100,16 @@ class Settings(BaseSettings):
     creator_name: str = "Abhinav Singh"  # creator signature, surfaced via /api/health
 
     @model_validator(mode="after")
+    def _validate_provider_models(self) -> "Settings":
+        self.gemini_model = normalize_gemini_model(self.gemini_model)
+        if self.gemini_model not in GEMINI_TEXT_MODELS:
+            raise ValueError(
+                "VEDNIX_GEMINI_MODEL must be a supported Gemini text-generation model "
+                f"(one of: {', '.join(GEMINI_TEXT_MODELS)})."
+            )
+        return self
+
+    @model_validator(mode="after")
     def _absolutize_local_paths(self) -> "Settings":
         """Anchor relative paths to the backend root.
 
@@ -117,7 +134,23 @@ class Settings(BaseSettings):
         .env copied from a previous Vednix release safe when Next.js falls back
         from port 3000 to 3001.
         """
-        configured = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        configured = [o.strip().rstrip("/") for o in self.cors_origins.split(",") if o.strip()]
+        for origin in configured:
+            parsed = urlsplit(origin)
+            if (
+                origin == "*"
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.netloc
+                or parsed.path not in {"", "/"}
+                or parsed.query
+                or parsed.fragment
+                or parsed.username
+                or parsed.password
+            ):
+                raise ValueError(
+                    "VEDNIX_CORS_ORIGINS must contain exact http(s) origins; "
+                    "wildcards and URL paths are not allowed with credentials."
+                )
         local = [
             "http://localhost:3000", "http://127.0.0.1:3000",
             "http://localhost:3001", "http://127.0.0.1:3001",

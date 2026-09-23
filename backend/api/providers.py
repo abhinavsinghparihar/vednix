@@ -14,10 +14,9 @@ router = APIRouter(tags=["providers"])
 
 
 @router.get("/catalog")
-async def catalog() -> dict:
-    """Setup-wizard data: every provider's card content. No secrets exist here
-    by construction — the registry ships with the binary."""
-    return {"providers": provider_catalog()}
+async def catalog(core=Depends(get_core)) -> dict:
+    """Setup-wizard data: public provider and text-model metadata only."""
+    return {"providers": provider_catalog(core.settings)}
 
 
 @router.get("")
@@ -59,7 +58,10 @@ async def verify(provider: str, providers: ProviderService = Depends(get_provide
 @router.post("/{provider}/toggle")
 async def toggle(provider: str, body: ProviderToggleIn,
                  providers: ProviderService = Depends(get_providers)) -> dict:
-    ok = await providers.set_enabled(provider, body.enabled)
+    try:
+        ok = await providers.set_enabled(provider, body.enabled)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not ok:
         raise HTTPException(status_code=404, detail="Provider is not configured.")
     return {"ok": True, "enabled": body.enabled}
@@ -75,4 +77,11 @@ async def ollama_status(providers: ProviderService = Depends(get_providers),
                         core=Depends(get_core)) -> dict:
     """The wizard's auto-detector: is Ollama serving, and what's installed."""
     result = await providers.verify("ollama", settings=core.settings)
-    return {"running": result["connected"], "models": result["models"], "detail": result["detail"]}
+    return {
+        "running": bool(result["running"]),
+        "models": result["models"],
+        "default_model": result["verification_model"],
+        "model_available": result["model_available"],
+        "chat_available": result["model_available"],
+        "detail": result["detail"],
+    }

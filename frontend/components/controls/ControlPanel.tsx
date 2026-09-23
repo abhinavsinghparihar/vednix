@@ -100,7 +100,7 @@ function VoiceSection() {
 }
 
 export function ControlPanel() {
-  const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature, providerChoice, setProvider } = useChat();
+  const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature, providerChoice, setProvider, providerError } = useChat();
   const [providerOptions, setProviderOptions] = useState<ProviderConfig[]>([]);
   useEffect(() => {
     void providerApi.configured().then((r) => setProviderOptions(r.providers)).catch(() => setProviderOptions([]));
@@ -135,11 +135,16 @@ export function ControlPanel() {
               >
                 <option value="auto">Automatic priority (recommended)</option>
                 <option value="ollama">Vednix Engine · Ollama</option>
-                {providerOptions.filter((p) => p.provider !== "ollama" && p.enabled && p.has_key).map((p) => (
+                {providerOptions.filter((p) => p.provider !== "ollama" && p.enabled && p.has_key && p.verified && p.status === "connected").map((p) => (
                   <option key={p.provider} value={p.provider}>{p.label}</option>
                 ))}
               </select>
-              <p className="text-[11px] leading-snug text-faint">Choose a configured agent for this chat, or let Vednix fail over automatically.</p>
+              <p className="text-[11px] leading-snug text-faint">Choose a verified provider for this chat, or let Vednix fail over automatically.</p>
+              {providerError && (
+                <p role="status" className="rounded-lg border border-[#f0746e]/20 bg-[#f0746e]/[0.06] px-3 py-2 text-[11px] leading-snug text-[#f49a96]">
+                  {providerError}
+                </p>
+              )}
             </Section>
 
             <Section title="Model">
@@ -150,10 +155,12 @@ export function ControlPanel() {
                   className="glass w-full appearance-none rounded-xl px-3 py-2.5 text-sm text-cream outline-none focus:border-[rgba(227,184,87,0.4)] [&>option]:bg-charcoal"
                   aria-label="Select model"
                 >
+                  {modelOptions.length === 0 && (
+                    <option value="">{providerError ? "No verified text model" : "Loading models…"}</option>
+                  )}
                   {modelOptions.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
-                  {modelOptions.length === 0 && <option value="">qwen2.5:3b (local)</option>}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               </div>

@@ -4,7 +4,7 @@
  */
 
 import type { Language } from "./ws";
-import { API_BASE, WS_URL } from "./config";
+import { API_BASE, API_BASE_CONFIGURED, WS_URL } from "./config";
 import { ApiError, apiFetch, getAccessToken } from "./tokenVault";
 
 export { API_BASE, WS_URL };
@@ -72,9 +72,34 @@ export interface KnowledgeHit {
   score: number;
 }
 
+export interface HealthInfo {
+  status: string;
+  provider?: string;
+  active_provider?: string | null;
+  ollama_available: boolean;
+  default_model: string;
+  backend_online?: boolean;
+  chat_available?: boolean;
+  provider_configured?: boolean;
+  provider_verified?: boolean;
+  model_available?: boolean;
+}
+
+export interface ModelCatalog {
+  provider?: string | null;
+  default: string;
+  available: string[];
+  configured?: boolean;
+  verified?: boolean;
+  enabled?: boolean;
+  model_available?: boolean;
+  chat_available?: boolean;
+  error?: string | null;
+}
+
 export const api = {
-  health: () => request<{ status: string; provider?: string; ollama_available: boolean; default_model: string }>("/api/health"),
-  models: (provider?: string | null) => request<{ default: string; available: string[] }>(
+  health: () => request<HealthInfo>("/api/health"),
+  models: (provider?: string | null) => request<ModelCatalog>(
     `/api/models${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
   ),
 
@@ -92,6 +117,9 @@ export const api = {
   deleteMemory: (id: number) => request<void>(`/api/memory/${id}`, { method: "DELETE" }),
 
   uploadFiles: async (files: File[]): Promise<UploadedFileMeta[]> => {
+    if (!API_BASE_CONFIGURED) {
+      throw new ApiError(0, "Backend URL is not configured. Set NEXT_PUBLIC_API_BASE to the Render backend URL and redeploy.");
+    }
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
     const token = getAccessToken();

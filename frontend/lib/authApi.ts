@@ -4,8 +4,8 @@
  * token, single-flight refresh, credentialed fetch, CSRF mirror).
  */
 
-import { API_BASE } from "./config";
-import { apiFetch, csrfToken, setAccessToken } from "./tokenVault";
+import { API_BASE, API_BASE_CONFIGURED } from "./config";
+import { apiFetch, csrfToken, setAccessToken, setCsrfToken } from "./tokenVault";
 
 // ---------------------------------------------------------------------------
 // Types (mirror backend/api schemas)
@@ -69,9 +69,11 @@ export interface ProviderConfig {
   provider: string;
   label: string;
   enabled: boolean;
+  configured?: boolean;
   has_key: boolean;
   key_hint: string | null;
-  status: "unverified" | "connected" | "failed";
+  verified?: boolean;
+  status: "unverified" | "connected" | "failed" | "unavailable";
   status_detail: string | null;
   model_override: string | null;
   base_url_override: string | null;
@@ -82,6 +84,11 @@ export interface ProviderConfig {
 export interface VerifyResult {
   provider: string;
   connected: boolean;
+  enabled?: boolean;
+  verified?: boolean;
+  verification_model?: string | null;
+  model_available?: boolean;
+  running?: boolean | null;
   detail: string;
   models: string[];
 }
@@ -91,7 +98,25 @@ export interface SystemStatus {
   uploads_bytes: number;
   counts: { conversations: number; messages: number; memories: number };
   cpu: { cores: number; load1: number | null };
-  ollama: { running: boolean; models_running: { name: string; size: number; size_vram: number }[]; host: string };
+  backend_online?: boolean;
+  chat_available?: boolean;
+  provider_configured?: boolean;
+  provider_verified?: boolean;
+  model_available?: boolean;
+  providers?: {
+    provider: string; label: string; configured: boolean; verified: boolean;
+    enabled: boolean; status: string; status_detail: string | null;
+    model: string; model_available: boolean; chat_available: boolean;
+  }[];
+  ollama: {
+    running: boolean;
+    models_running: { name: string; size: number; size_vram: number }[];
+    host: string;
+    models?: string[];
+    default_model?: string;
+    model_available?: boolean;
+    chat_available?: boolean;
+  };
   active_provider: string;
   default_model: string;
 }
@@ -103,6 +128,7 @@ export interface SystemStatus {
 interface TokenPayload {
   access_token: string;
   expires_in: number;
+  csrf_token?: string;
   user: UserOut;
 }
 
@@ -113,6 +139,7 @@ export const authApi = {
       body: JSON.stringify(input),
     });
     setAccessToken(body.access_token);
+    if (typeof body.csrf_token === "string") setCsrfToken(body.csrf_token);
     return body.user;
   },
 
@@ -122,6 +149,7 @@ export const authApi = {
       body: JSON.stringify(input),
     });
     setAccessToken(body.access_token);
+    if (typeof body.csrf_token === "string") setCsrfToken(body.csrf_token);
     return body.user;
   },
 
@@ -136,6 +164,7 @@ export const authApi = {
       method: "POST", body: JSON.stringify({ email, code, remember }),
     }, { retryOn401: false });
     setAccessToken(body.access_token);
+    if (typeof body.csrf_token === "string") setCsrfToken(body.csrf_token);
     return body.user;
   },
 
@@ -155,15 +184,24 @@ export const authApi = {
   revokeSession: (id: string) => apiFetch<void>(`/api/auth/sessions/${id}`, { method: "DELETE" }),
 
   async logout(): Promise<void> {
-    await fetch(`${API_BASE}/api/auth/logout`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "content-type": "application/json",
-        ...(csrfToken() ? { "X-CSRF-Token": csrfToken()! } : {}),
-      },
-    });
-    setAccessToken(null);
+    if (!API_BASE_CONFIGURED) {
+      setAccessToken(null);
+      setCsrfToken(null);
+      return;
+    }
+    try {
+      await fetch(`${API_BASE}/api/auth/logout`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          ...(csrfToken() ? { "X-CSRF-Token": csrfToken()! } : {}),
+        },
+      });
+    } finally {
+      setAccessToken(null);
+      setCsrfToken(null);
+    }
   },
 };
 
@@ -231,5 +269,5 @@ export const providerApi = {
   setPriority: (order: string[]) =>
     apiFetch<{ priority: string[] }>("/api/providers/priority", { method: "PUT", body: JSON.stringify({ order }) }),
   ollamaStatus: () =>
-    apiFetch<{ running: boolean; models: string[]; detail: string }>("/api/providers/ollama/status"),
+    apiFetch<{ running: boolean; models: string[]; default_model: string; model_available: boolean; chat_available: boolean; detail: string }>("/api/providers/ollama/status"),
 };

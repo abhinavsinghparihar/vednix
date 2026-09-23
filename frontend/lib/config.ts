@@ -1,19 +1,31 @@
 /**
- * Shared runtime configuration — pulled out of api.ts so the token vault and
- * the REST client can both read endpoints without an import cycle.
+ * Shared browser API configuration.
+ *
+ * Local browser development pairs its host with backend :8000. Production must
+ * set NEXT_PUBLIC_API_BASE to the Render service URL; the old production
+ * fallback pointed Vercel browsers at their own localhost and could never work.
  */
 
-// Host-derived API base: if the app is opened as localhost:3000 the backend
-// is localhost:8000; as 127.0.0.1:3000 → 127.0.0.1:8000. Same-host matters
-// since Phase 7: the auth refresh cookie is SameSite=Lax, and "localhost" vs
-// "127.0.0.1" are DIFFERENT sites — only a same-host pairing lets the cookie
-// flow. NEXT_PUBLIC_API_BASE still overrides everything (real deployments).
-const _host = typeof window !== "undefined" ? window.location.hostname : "127.0.0.1";
-const _loopback = _host === "localhost" || _host === "127.0.0.1";
+const host = typeof window !== "undefined" ? window.location.hostname : "";
+const isLoopback = host === "localhost" || host === "127.0.0.1";
+const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE?.trim().replace(/\/$/, "") ?? "";
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE ?? (_loopback ? `http://${_host}:8000` : "http://127.0.0.1:8000");
+export const API_BASE = configuredApiBase || (isLoopback ? `http://${host}:8000` : "");
+export const API_BASE_CONFIGURED = Boolean(configuredApiBase || isLoopback);
+
+function deriveWebSocketUrl(apiBase: string): string {
+  if (!apiBase) return "";
+  try {
+    const url = new URL(apiBase);
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/ws/chat`;
+    url.search = "";
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
 
 export const WS_URL =
-  process.env.NEXT_PUBLIC_WS_BASE ??
-  (_loopback ? `ws://${_host}:8000/ws/chat` : "ws://127.0.0.1:8000/ws/chat");
+  process.env.NEXT_PUBLIC_WS_BASE?.trim() || deriveWebSocketUrl(API_BASE);
