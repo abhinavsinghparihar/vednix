@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Globe, Volume2, ChevronDown, Play, Bot } from "lucide-react";
+import { Globe, Volume2, ChevronDown, Play, Bot, X } from "lucide-react";
 import { useChat } from "@/store/chat";
 import { providerApi, type ProviderConfig } from "@/lib/authApi";
 import type { Language } from "@/lib/ws";
@@ -100,11 +100,45 @@ function VoiceSection() {
 }
 
 export function ControlPanel() {
-  const { panelOpen, modelOptions, activeModel, setModel, temperature, setTemperature, providerChoice, setProvider, providerError } = useChat();
+  const {
+    panelOpen, setPanelOpen, togglePanel, modelOptions, visionModelOptions, activeModel,
+    setModel, temperature, setTemperature, providerChoice, setProvider, providerError,
+    draftAttachments,
+  } = useChat();
+  const imagePending = draftAttachments.some((attachment) => attachment.kind === "image");
+  const visibleModelOptions = imagePending ? visionModelOptions : modelOptions;
   const [providerOptions, setProviderOptions] = useState<ProviderConfig[]>([]);
+  const [responsiveReady, setResponsiveReady] = useState(false);
   useEffect(() => {
     void providerApi.configured().then((r) => setProviderOptions(r.providers)).catch(() => setProviderOptions([]));
   }, []);
+  useEffect(() => {
+    const compact = window.matchMedia("(max-width: 1023px)");
+    const syncPanelForViewport = () => {
+      if (compact.matches) setPanelOpen(false);
+      setResponsiveReady(true);
+    };
+    syncPanelForViewport();
+    compact.addEventListener("change", syncPanelForViewport);
+    return () => compact.removeEventListener("change", syncPanelForViewport);
+  }, [setPanelOpen]);
+  useEffect(() => {
+    if (!panelOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPanelOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [panelOpen, setPanelOpen]);
+  useEffect(() => {
+    if (visibleModelOptions.length === 0) {
+      if (imagePending && activeModel !== null) setModel(null);
+      return;
+    }
+    if (!activeModel || !visibleModelOptions.includes(activeModel)) {
+      setModel(visibleModelOptions[0] ?? null);
+    }
+  }, [activeModel, imagePending, setModel, visibleModelOptions]);
   const internet = useChat((s) => s.internet);
   const setInternet = useChat((s) => s.setInternet);
   const multiAgent = useChat((s) => s.multiAgent);
@@ -114,17 +148,42 @@ export function ControlPanel() {
 
   return (
     <AnimatePresence>
-      {panelOpen && (
-        <motion.aside
-          initial={{ x: 320, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: 320, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 320, damping: 32 }}
-          className="glass-liquid z-20 m-3 ml-0 w-[292px] shrink-0 rounded-3xl px-5 py-5
-                     max-lg:fixed max-lg:right-0 max-lg:top-0 max-lg:m-0 max-lg:h-full max-lg:rounded-l-3xl"
-        >
-          <div className="no-scrollbar flex h-full flex-col gap-6 overflow-y-auto">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-faint">Studio</p>
+      {responsiveReady && panelOpen && (
+        <>
+          <motion.button
+            type="button"
+            aria-label="Close Studio panel"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={togglePanel}
+            className="fixed inset-0 z-40 cursor-default bg-black/65 backdrop-blur-[2px] lg:hidden"
+          />
+          <motion.aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Studio controls"
+            initial={{ y: 18, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 18, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 320, damping: 32 }}
+            className="glass-liquid z-50 m-3 ml-0 w-[292px] shrink-0 rounded-3xl px-5 py-5
+                       max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:top-auto max-lg:m-0
+                       max-lg:h-[min(82dvh,720px)] max-lg:w-full max-lg:rounded-b-none max-lg:rounded-t-3xl
+                       max-lg:px-4 max-lg:pb-[max(1rem,env(safe-area-inset-bottom))]
+                       max-lg:pt-2 max-lg:shadow-[0_-20px_80px_rgba(0,0,0,0.7)]"
+          >
+            <div className="no-scrollbar flex h-full flex-col gap-5 overflow-y-auto overscroll-contain">
+              <div className="sticky top-0 z-10 -mx-1 flex items-center justify-between bg-charcoal/95 px-1 pb-2 pt-1 backdrop-blur-lg lg:hidden">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-faint">Studio</p>
+                  <p className="mt-0.5 text-[11px] text-muted">Your chat stays open behind this panel.</p>
+                </div>
+                <Button size="icon" variant="ghost" aria-label="Close Studio" onClick={togglePanel}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="hidden text-[10px] font-semibold uppercase tracking-[0.3em] text-faint lg:block">Studio</p>
 
             <Section title="Agent / Provider">
               <select
@@ -134,8 +193,7 @@ export function ControlPanel() {
                 aria-label="Select AI provider"
               >
                 <option value="auto">Automatic priority (recommended)</option>
-                <option value="ollama">Vednix Engine · Ollama</option>
-                {providerOptions.filter((p) => p.provider !== "ollama" && p.enabled && p.has_key && p.verified && p.status === "connected").map((p) => (
+                {providerOptions.filter((p) => (p.provider === "gemini" || p.provider === "groq") && p.enabled && p.has_key && p.verified && p.status === "connected").map((p) => (
                   <option key={p.provider} value={p.provider}>{p.label}</option>
                 ))}
               </select>
@@ -150,20 +208,32 @@ export function ControlPanel() {
             <Section title="Model">
               <div className="relative">
                 <select
-                  value={activeModel ?? ""}
+                  value={activeModel && visibleModelOptions.includes(activeModel) ? activeModel : ""}
                   onChange={(e) => setModel(e.target.value)}
                   className="glass w-full appearance-none rounded-xl px-3 py-2.5 text-sm text-cream outline-none focus:border-[rgba(227,184,87,0.4)] [&>option]:bg-charcoal"
                   aria-label="Select model"
                 >
-                  {modelOptions.length === 0 && (
-                    <option value="">{providerError ? "No verified text model" : "Loading models…"}</option>
+                  {visibleModelOptions.length === 0 && (
+                    <option value="">
+                      {imagePending
+                        ? "No vision-capable model"
+                        : providerError ? "No verified text model" : "Loading models…"}
+                    </option>
                   )}
-                  {modelOptions.map((m) => (
+                  {visibleModelOptions.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
                 </select>
                 <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
               </div>
+              {imagePending && visibleModelOptions.length === 0 && (
+                <p role="status" className="text-[11px] leading-snug text-[#f49a96]">
+                  This provider has no verified vision-capable chat model. Remove the image or switch to a provider with vision support.
+                </p>
+              )}
+              {imagePending && visibleModelOptions.length > 0 && (
+                <p className="text-[11px] leading-snug text-faint">Image attached: only vision-capable chat models are shown.</p>
+              )}
             </Section>
 
             <Section title={`Temperature · ${temperature.toFixed(2)}`}>
@@ -224,11 +294,12 @@ export function ControlPanel() {
                 VEDNIX AI
               </span>
               <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-faint">
-                next-gen workspace · v0.1 · fully local
+                multi-provider workspace · v0.1
               </span>
             </div>
-          </div>
-        </motion.aside>
+            </div>
+          </motion.aside>
+        </>
       )}
     </AnimatePresence>
   );

@@ -1,33 +1,29 @@
-# Vednix AI project inventory
+# Vednix project inventory
 
-This is the keep/delete guide. Do not delete folders marked KEEP: they are imported by the running app or required for tests, startup, persistence, security, or deployment.
+## Frontend
 
-## KEEP — frontend
-- `frontend/app/` — Next.js routes: landing, login, signup, onboarding, chat, settings and profile.
-- `frontend/components/` — UI, auth, landing, workspace, chat, controls, onboarding, orb and shared primitives.
-- `frontend/hooks/` — speech recognition.
-- `frontend/lib/` — REST client, auth/session vault, WebSocket, theme, TTS, branding and utilities.
-- `frontend/store/` — Zustand auth and chat state.
-- `frontend/types/` — speech TypeScript declarations.
-- `frontend/package.json`, `package-lock.json`, `tsconfig.json`, `next.config.ts`, `postcss.config.mjs`, `next-env.d.ts`, `Dockerfile`, `.env.local.example`.
+- `frontend/app/` — landing, authentication, onboarding, workspace, settings, and profile routes.
+- `frontend/components/` — chat, composer, sidebar, Studio, workspace views, onboarding, auth, and shared UI.
+- `frontend/hooks/` — browser speech recognition and reusable hooks.
+- `frontend/lib/` — API clients, WebSocket client, auth/session handling, theme, TTS, and utilities.
+- `frontend/store/` — account and workspace/chat state.
+- `frontend/package.json`, `package-lock.json`, `tsconfig.json`, `next.config.ts`, and `Dockerfile` — build/runtime setup.
 
-## KEEP — backend
-- `backend/api/` — FastAPI routes.
-- `backend/ai_engine/` — Ollama, cloud providers, routing, prompts and engine pipeline.
-- `backend/agents/` — built-in plugins and SearXNG research graphs.
-- `backend/core/` — sessions, encryption, JWT, rate limits and logging.
-- `backend/memory/` — SQLAlchemy models, SQLite initialization and persistence.
-- `backend/services/` — users, onboarding, providers, knowledge and file storage.
-- `backend/scripts/` — password recovery utility.
-- `backend/tests/` — regression and integration tests.
-- `backend/main.py`, `config.py`, `requirements*.txt`, `pytest.ini`, `Dockerfile`, `.env.example`.
-- `backend/data/vednix.db` and `backend/data/secret.key` — local state and encrypted-key material; never delete.
+## Backend
 
-## KEEP — root
-- `scripts/launch.py`, `start.bat`, `start.sh`, `README.md`, `docs/`.
+- `backend/api/` — FastAPI REST endpoints and the WebSocket chat transport.
+- `backend/ai_engine/` — Gemini/Groq adapters, model capability data, safe provider errors, and chat engine.
+- `backend/services/providers.py` — encrypted provider-key management and live model validation.
+- `backend/services/resilient_llm.py` — provider/model selection and compatible-provider failover.
+- `backend/agents/` — plugins and optional SearXNG research.
+- `backend/core/` — encryption, auth, sessions, rate limits, and logging.
+- `backend/memory/` — SQLAlchemy models, database initialization, conversations, and memory.
+- `backend/services/` — users, onboarding, uploads, knowledge, and provider services.
+- `backend/tests/` — unit and integration regressions.
+- `backend/requirements*.txt`, `pytest.ini`, `Dockerfile`, and `.env.example` — install, test, deploy, and configuration files.
 
-## Generated/local files
-Do not commit/copy `frontend/node_modules/`, `frontend/.next/`, Python `__pycache__/`, logs, or `backend/data/*.db-wal`/`*.db-shm`; they are runtime/generated.
+## Root and local/generated files
 
-## Cleanup conclusion
-No application folder is safely confirmed unused. Deleting apparently unused files can remove a route, plugin, test fixture, or deployment path. Run `npm run typecheck`, `npm run build`, and `pytest` after future cleanup.
+- `scripts/launch.py`, `start.bat`, `start.sh`, `docker-compose.yml`, `README.md`, and `docs/` — launch, deployment, and project guidance.
+- Never commit credentials, encrypted-key databases, server secret files, logs, `node_modules`, `.next`, virtual environments, or Python cache files.
+- `.env.example` files contain placeholders only. Real provider keys are entered in Settings and remain server-side.

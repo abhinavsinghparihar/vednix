@@ -1,23 +1,12 @@
-"""Onboarding / run-mode state — server-owned truth for the first-run wizard.
-
-Two keys in app_settings:
-  setup_complete : "1" once the user has passed the welcome flow
-  mode           : free | cloud | "" (chosen but not yet finished)
-
-Rule of the house: NO SIGNUP, NO ENTRY — there is no guest/demo mode. Every
-choice completes first-run setup; the wizard is re-enterable anytime from
-settings. Everything here is data, so it lives in the db (not env/config)
-and any process restart resumes exactly where the user left the wizard.
-"""
+"""Server-owned first-run onboarding state."""
 
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from memory.models import AppSetting
 
-VALID_MODES = {"free", "cloud"}
+VALID_MODES = {"cloud"}
 
 
 class OnboardingService:
@@ -45,11 +34,9 @@ class OnboardingService:
         }
 
     async def choose_mode(self, mode: str) -> dict:
-        """Wizard step: user picked free (Vednix Engine on this machine) or
-        cloud (bring-your-own API keys). Every choice completes first-run
-        setup — re-entry is just visiting /onboarding again."""
+        """Record the supported provider-backed workspace mode."""
         if mode not in VALID_MODES:
-            raise ValueError(f"mode must be one of {sorted(VALID_MODES)}")
+            raise ValueError("mode must be 'cloud'.")
         await self._put("mode", mode)
         await self._put("setup_complete", "1")
         return await self.status()

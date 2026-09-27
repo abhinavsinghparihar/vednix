@@ -113,7 +113,7 @@ export function DashboardView() {
         {/* live stats — every number is real */}
         <div className="mt-9 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard icon={MessageSquare} label="conversations" value={conversations.length} sub="streaming · multilingual" delay={0} />
-          <StatCard icon={BrainCircuit} label="memories" value={memoryCount ?? "…"} sub="long-term, on-device" delay={60} />
+          <StatCard icon={BrainCircuit} label="memories" value={memoryCount ?? "…"} sub="long-term, backend-stored" delay={60} />
           <StatCard icon={BookOpen} label="knowledge docs" value={docCount ?? "…"} sub="FTS5 · cited answers" delay={120} />
           <StatCard icon={MessageSquarePlus} label="models" value={modelOptions.length || "…"} sub={`default · ${activeModel ?? "auto"}`} delay={180} />
         </div>

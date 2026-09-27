@@ -34,35 +34,43 @@ export interface SessionInfo {
 
 export interface OnboardingStatus {
   setup_complete: boolean;
-  mode: "free" | "cloud" | null;
+  mode: "cloud" | null;
   auth_enabled: boolean;
-  ollama_running: boolean;
+  providers: ProviderConfig[];
   active_provider: string;
-}
-
-export interface LocalModelRec {
-  tag: string;
-  tier: string;
-  best_for: string;
-  ram_gb: number;
-  disk_gb: number;
-  speed: string;
-  quality: string;
-  pull: string;
+  chat_available: boolean;
 }
 
 export interface ProviderCatalogItem {
-  id: string;
+  id: "gemini" | "groq";
   label: string;
   kind: string;
   needs_key: boolean;
-  default_model: string;
   key_url: string;
   docs_url: string;
-  vision: boolean;
-  models: string[];
+  capabilities: string[];
   blurb: string;
-  base_url: string;
+}
+
+export interface ProviderModelInfo {
+  id: string;
+  provider: string;
+  displayName: string;
+  capabilities: {
+    text: boolean;
+    vision: boolean;
+    audioInput: boolean;
+    audioOutput: boolean;
+    imageGeneration: boolean;
+    video: boolean;
+    tools: boolean;
+  };
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
+  available: boolean;
+  reason: string | null;
+  latencyMs: number | null;
+  checkedCapabilities: string[];
 }
 
 export interface ProviderConfig {
@@ -76,7 +84,6 @@ export interface ProviderConfig {
   status: "unverified" | "connected" | "failed" | "unavailable";
   status_detail: string | null;
   model_override: string | null;
-  base_url_override: string | null;
   priority: number | null;
   verified_at: string | null;
 }
@@ -88,7 +95,6 @@ export interface VerifyResult {
   verified?: boolean;
   verification_model?: string | null;
   model_available?: boolean;
-  running?: boolean | null;
   detail: string;
   models: string[];
 }
@@ -108,16 +114,8 @@ export interface SystemStatus {
     enabled: boolean; status: string; status_detail: string | null;
     model: string; model_available: boolean; chat_available: boolean;
   }[];
-  ollama: {
-    running: boolean;
-    models_running: { name: string; size: number; size_vram: number }[];
-    host: string;
-    models?: string[];
-    default_model?: string;
-    model_available?: boolean;
-    chat_available?: boolean;
-  };
   active_provider: string;
+  active_provider_label: string;
   default_model: string;
 }
 
@@ -211,9 +209,8 @@ export const authApi = {
 
 export const onboardingApi = {
   status: () => apiFetch<OnboardingStatus>("/api/onboarding/status", {}, { retryOn401: false }),
-  chooseMode: (mode: "free" | "cloud") =>
+  chooseMode: (mode: "cloud" = "cloud") =>
     apiFetch<OnboardingStatus>("/api/onboarding/mode", { method: "POST", body: JSON.stringify({ mode }) }),
-  localModels: () => apiFetch<{ models: LocalModelRec[] }>("/api/onboarding/local-models"),
   wipeData: () =>
     apiFetch<{ conversations_deleted: number; memories_deleted: number }>(
       "/api/onboarding/wipe-data", { method: "POST" },
@@ -222,12 +219,6 @@ export const onboardingApi = {
 
 export const systemApi = {
   status: () => apiFetch<SystemStatus>("/api/system/status"),
-  defaultModel: () => apiFetch<{ model: string; saved: boolean }>("/api/providers/ollama/default-model"),
-  setDefaultModel: (model: string) =>
-    apiFetch<{ model: string; saved: boolean }>("/api/providers/ollama/default-model", {
-      method: "PUT",
-      body: JSON.stringify({ model }),
-    }),
 };
 
 export interface AdminUser {
@@ -257,17 +248,23 @@ export const adminApi = {
 export const providerApi = {
   catalog: () => apiFetch<{ providers: ProviderCatalogItem[] }>("/api/providers/catalog"),
   configured: () => apiFetch<{ providers: ProviderConfig[]; priority: string[] }>("/api/providers"),
-  saveKey: (provider: string, input: { api_key?: string; base_url?: string; model?: string }) =>
+  saveKey: (provider: string, input: { api_key?: string; model?: string }) =>
     apiFetch<ProviderConfig>(`/api/providers/${provider}/key`, {
       method: "PUT",
       body: JSON.stringify(input),
     }),
   removeKey: (provider: string) => apiFetch<void>(`/api/providers/${provider}/key`, { method: "DELETE" }),
   verify: (provider: string) => apiFetch<VerifyResult>(`/api/providers/${provider}/verify`, { method: "POST" }),
+  models: (provider: string, task = "text", force = false) =>
+    apiFetch<{ provider: string; task: string; models: ProviderModelInfo[]; available: string[]; rejected: { id: string; reason: string }[]; default?: string; error?: string | null }>(
+      `/api/providers/${provider}/models?task=${encodeURIComponent(task)}${force ? "&force=true" : ""}`,
+    ),
+  validateModel: (provider: string, model_id: string, task = "text") =>
+    apiFetch<ProviderModelInfo>(`/api/providers/${provider}/models/validate`, {
+      method: "POST", body: JSON.stringify({ model_id, task }),
+    }),
   toggle: (provider: string, enabled: boolean) =>
     apiFetch(`/api/providers/${provider}/toggle`, { method: "POST", body: JSON.stringify({ enabled }) }),
   setPriority: (order: string[]) =>
     apiFetch<{ priority: string[] }>("/api/providers/priority", { method: "PUT", body: JSON.stringify({ order }) }),
-  ollamaStatus: () =>
-    apiFetch<{ running: boolean; models: string[]; default_model: string; model_available: boolean; chat_available: boolean; detail: string }>("/api/providers/ollama/status"),
 };

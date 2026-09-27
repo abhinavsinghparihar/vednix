@@ -24,7 +24,7 @@ const STATE_STYLES: Record<string, string> = {
 };
 
 export function Topbar() {
-  const { toggleSidebar, togglePanel, activeId, conversations, renameConversation } = useChat();
+  const { toggleSidebar, sidebarOpen, togglePanel, panelOpen, activeId, conversations, renameConversation } = useChat();
   const coreState = useDisplayCoreState();
   const conv = conversations.find((c) => c.id === activeId);
   const [editing, setEditing] = useState(false);
@@ -38,7 +38,13 @@ export function Topbar() {
   return (
     <header className="glass-liquid mx-3 mt-3 flex items-center gap-2 rounded-2xl px-2.5 py-2 md:mx-4">
 
-      <Button size="icon" variant="ghost" aria-label="Toggle sidebar" onClick={toggleSidebar}>
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-label={sidebarOpen ? "Close conversation sidebar" : "Open conversation sidebar"}
+        aria-expanded={sidebarOpen}
+        onClick={toggleSidebar}
+      >
         <PanelLeft className="h-4 w-4" />
       </Button>
 
@@ -77,11 +83,17 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-2.5">
-        <span className={cn("font-mono text-[10px] uppercase tracking-[0.24em] transition-colors", STATE_STYLES[coreState])}>
+        <span className={cn("hidden font-mono text-[10px] uppercase tracking-[0.24em] transition-colors sm:inline", STATE_STYLES[coreState])}>
           {coreState}
         </span>
         <Orb state={coreState} size={34} />
-        <Button size="icon" variant="ghost" aria-label="Toggle studio panel" onClick={togglePanel}>
+        <Button
+          size="icon"
+          variant="ghost"
+          aria-label={panelOpen ? "Close Studio panel" : "Open Studio panel"}
+          aria-expanded={panelOpen}
+          onClick={togglePanel}
+        >
           <PanelRight className="h-4 w-4" />
         </Button>
       </div>

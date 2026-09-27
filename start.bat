@@ -1,14 +1,6 @@
 @echo off
-rem ============================================================
-rem   VEDNIX AI - one-click launcher (Windows)
-rem   Bas is file pe DOUBLE-CLICK karo. Na Ollama janna zaroori,
-rem   na pip, na npm - neeche diye steps sab apne aap hote hain:
-rem     1. Python check          5. Vednix Engine auto-install
-rem     2. Backend venv + deps   6. Engine start + model download
-rem     3. Node check            7. Backend + Frontend start
-rem     4. Frontend install      8. Browser khud khul jayega
-rem   Rokna ho to is window me Ctrl+C dabao.
-rem ============================================================
+rem Vednix AI one-click launcher for Windows. Requires Python 3.11+ and Node 20+.
+rem Creates the project venv, installs dependencies, then starts the API and web app.
 title VEDNIX AI - Launcher
 cd /d "%~dp0"
 
@@ -25,16 +17,15 @@ if %errorlevel%==0 (
 )
 
 echo.
-echo   [X] Python nahi mila.
-echo   [-] Ek baar install karo: https://www.python.org/downloads/
-echo       (install karte waqt "Add python.exe to PATH" zaroor tick karo)
+echo   Python 3.11+ was not found: https://www.python.org/downloads/
+echo   During installation, enable "Add python.exe to PATH".
 echo.
 goto :pause
 
 :end
 if errorlevel 1 (
     echo.
-    echo   Launcher ruk gaya - upar diya message padho, wahi fix karna hai.
+    echo   Launcher stopped. Read the error above and retry.
     echo.
 )
 

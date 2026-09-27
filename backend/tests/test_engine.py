@@ -48,13 +48,13 @@ async def test_llm_error_is_NOT_persisted_B2(core, memory):
     assert [m["role"] for m in history] == ["user"]
 
 
-async def test_ollama_offline_message_not_persisted_and_helpful(core, memory):
+async def test_unavailable_provider_message_not_persisted_and_helpful(core, memory):
     conv = await memory.create_conversation()
     session = core(FakeLLM(offline=True)).create_session(memory, conv.id)
 
     reply = await collect(session.stream_reply("kuch bhi"))
 
-    assert "ollama serve" in reply
+    assert "No verified Gemini or Groq provider" in reply
     assert await memory.message_count(conv.id) == 1  # user turn only
 
 

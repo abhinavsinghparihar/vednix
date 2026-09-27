@@ -1,7 +1,7 @@
 /**
  * Onboarding shared atoms — the wizard shell (progress rail + animated step
- * transitions), copy-to-clipboard chips, status dots, spec chips and the
- * polling hook the auto-detector uses. Everything inherits the Obsidian/Ivory
+ * transitions), copy-to-clipboard chips, status dots, spec chips and a
+ * reusable polling hook. Everything inherits the Obsidian/Ivory
  * glass system; nothing here invents a new visual language.
  */
 
@@ -152,7 +152,7 @@ export function SpecChip({ label, value }: { label: string; value: string }) {
   );
 }
 
-/* --- polling (ollama auto-detect) ----------------------------------------------- */
+/* --- reusable interval polling --------------------------------------------------- */
 
 export function usePoller(fn: () => Promise<void>, ms: number, active = true) {
   const saved = useRef(fn);

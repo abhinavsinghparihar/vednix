@@ -5,7 +5,7 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { MessageSquarePlus, Pin, PinOff, Search, Trash2, Pencil, Check, X, Folder } from "lucide-react";
 import { useChat } from "@/store/chat";
@@ -15,7 +15,7 @@ import { Button, Input } from "@/components/ui/primitives";
 import { Wordmark } from "@/components/brand/Wordmark";
 
 function ConversationRow({ conv, active }: { conv: ConversationSummary; active: boolean }) {
-  const { selectConversation, removeConversation, togglePin, renameConversation } = useChat();
+  const { selectConversation, removeConversation, togglePin, renameConversation, setSidebarOpen } = useChat();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(conv.title);
 
@@ -37,7 +37,10 @@ function ConversationRow({ conv, active }: { conv: ConversationSummary; active: 
           ? "bg-[rgba(227,184,87,0.10)] shadow-[inset_0_0_0_1px_rgba(227,184,87,0.28)]"
           : "hover:bg-white/[0.045]",
       )}
-      onClick={() => void selectConversation(conv.id)}
+      onClick={() => {
+        void selectConversation(conv.id);
+        if (window.matchMedia("(max-width: 767px)").matches) setSidebarOpen(false);
+      }}
     >
       {conv.pinned && <Pin className="h-3 w-3 shrink-0 -rotate-45 text-gold/70" />}
 
@@ -91,9 +94,35 @@ function ConversationRow({ conv, active }: { conv: ConversationSummary; active: 
 }
 
 export function Sidebar() {
-  const { conversations, activeId, newChat, loadingConversations, wsStatus, chatAvailable, sidebarOpen, provider } = useChat();
+  const {
+    conversations, activeId, newChat, loadingConversations, wsStatus, chatAvailable,
+    sidebarOpen, setSidebarOpen, toggleSidebar, provider,
+  } = useChat();
   const providerLabel = provider || "No provider";
   const [query, setQuery] = useState("");
+  const [responsiveReady, setResponsiveReady] = useState(false);
+
+  useEffect(() => {
+    const compact = window.matchMedia("(max-width: 767px)");
+    const syncSidebarForViewport = () => {
+      if (compact.matches) setSidebarOpen(false);
+      setResponsiveReady(true);
+    };
+    syncSidebarForViewport();
+    compact.addEventListener("change", syncSidebarForViewport);
+    return () => compact.removeEventListener("change", syncSidebarForViewport);
+  }, [setSidebarOpen]);
+
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && window.matchMedia("(max-width: 767px)").matches) {
+        setSidebarOpen(false);
+      }
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [sidebarOpen, setSidebarOpen]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -108,21 +137,43 @@ export function Sidebar() {
 
   return (
     <AnimatePresence>
-      {sidebarOpen && (
-        <motion.aside
-          initial={{ x: -320, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          exit={{ x: -320, opacity: 0 }}
-          transition={{ type: "spring", stiffness: 320, damping: 32 }}
-          className="glass-liquid z-30 m-3 mr-0 flex w-[290px] shrink-0 flex-col rounded-3xl px-4 py-4
-                     max-md:fixed max-md:left-0 max-md:top-0 max-md:m-0 max-md:h-full max-md:rounded-r-3xl max-md:shadow-[0_0_80px_rgba(0,0,0,0.8)]"
-        >
+      {responsiveReady && sidebarOpen && (
+        <>
+          <motion.button
+            type="button"
+            aria-label="Close conversation sidebar"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={toggleSidebar}
+            className="fixed inset-0 z-20 bg-black/65 backdrop-blur-[2px] md:hidden"
+          />
+          <motion.aside
+            initial={{ x: -320, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -320, opacity: 0 }}
+            transition={{ type: "spring", stiffness: 320, damping: 32 }}
+            className="glass-liquid z-30 m-3 mr-0 flex w-[290px] shrink-0 flex-col rounded-3xl px-4 py-4
+                       max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:right-auto max-md:m-0
+                       max-md:h-dvh max-md:w-[min(86vw,320px)] max-md:rounded-l-none max-md:rounded-r-3xl
+                       max-md:shadow-[0_0_80px_rgba(0,0,0,0.8)]"
+          >
           {/* brand — the official wordmark, same as landing */}
-          <div className="flex items-center px-1 pb-4">
+          <div className="flex items-center justify-between px-1 pb-4">
             <Wordmark />
+            <Button size="icon" variant="ghost" aria-label="Close conversation sidebar" onClick={toggleSidebar} className="md:hidden">
+              <X className="h-4 w-4" />
+            </Button>
           </div>
 
-          <Button variant="primary" onClick={newChat} className="mb-3 w-full">
+          <Button
+            variant="primary"
+            onClick={() => {
+              newChat();
+              if (window.matchMedia("(max-width: 767px)").matches) setSidebarOpen(false);
+            }}
+            className="mb-3 w-full"
+          >
             <MessageSquarePlus className="h-4 w-4" /> New chat
           </Button>
 
@@ -183,7 +234,8 @@ export function Sidebar() {
           </div>
           <div className="mt-2.5 flex justify-center pb-0.5">
           </div>
-        </motion.aside>
+          </motion.aside>
+        </>
       )}
     </AnimatePresence>
   );

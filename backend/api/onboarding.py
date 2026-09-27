@@ -1,75 +1,46 @@
-"""Onboarding routes — first-run state, mode choice (NO SIGNUP, NO ENTRY:
-only free / cloud), and static product data the wizard shows (recommended
-local models with honest RAM/disk/speed/quality figures — the user's
-hardware does the choosing)."""
+"""First-run account and provider onboarding."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
-from api.deps import get_core, get_memory, get_onboarding, get_users
+from api.deps import get_core, get_memory, get_onboarding, get_providers, get_users
 from api.schemas import ModeChoiceIn
 from services.onboarding import OnboardingService
+from services.providers import REGISTRY, ProviderService
 
 router = APIRouter(tags=["onboarding"])
 
-# Honest hardware math (q4_K_M-ish quantization): disk ≈ params × 0.6GB,
-# comfortable RAM ≈ disk + ~2GB working set. Speed/quality are qualitative
-# ladder positions, not benchmark cosplay.
-RECOMMENDED_MODELS = [
-    {"tag": "qwen2.5:3b", "tier": "Tiny", "best_for": "Fast · lightweight",
-     "ram_gb": 4, "disk_gb": 2, "speed": "Very fast", "quality": "Good",
-     "pull": "ollama pull qwen2.5:3b"},
-    {"tag": "qwen2.5:7b", "tier": "Balanced", "best_for": "Recommended for most",
-     "ram_gb": 8, "disk_gb": 5, "speed": "Fast", "quality": "Great",
-     "pull": "ollama pull qwen2.5:7b"},
-    {"tag": "deepseek-coder-v2:lite", "tier": "Coding", "best_for": "Code generation & review",
-     "ram_gb": 12, "disk_gb": 9, "speed": "Fast", "quality": "Great at code",
-     "pull": "ollama pull deepseek-coder-v2:lite"},
-    {"tag": "qwen2.5:14b", "tier": "Reasoning", "best_for": "Deeper answers",
-     "ram_gb": 16, "disk_gb": 9, "speed": "Medium", "quality": "Excellent",
-     "pull": "ollama pull qwen2.5:14b"},
-    {"tag": "llama3.1:8b", "tier": "Llama", "best_for": "Meta's all-rounder",
-     "ram_gb": 8, "disk_gb": 5, "speed": "Fast", "quality": "Great",
-     "pull": "ollama pull llama3.1:8b"},
-    {"tag": "gemma3:4b", "tier": "Gemma", "best_for": "Google's efficient small",
-     "ram_gb": 6, "disk_gb": 3, "speed": "Very fast", "quality": "Good",
-     "pull": "ollama pull gemma3:4b"},
-    {"tag": "mistral:7b", "tier": "Mistral", "best_for": "Classic open favorite",
-     "ram_gb": 8, "disk_gb": 4, "speed": "Fast", "quality": "Great",
-     "pull": "ollama pull mistral:7b"},
-]
-
 
 @router.get("/status")
-async def status(onboarding: OnboardingService = Depends(get_onboarding),
-                 users=Depends(get_users), core=Depends(get_core)) -> dict:
-    """Everything the wizard and the route guard need in ONE call."""
-    state = await onboarding.status()
-    if hasattr(core.llm, "ollama_available"):
-        ollama_running = await core.llm.ollama_available()
-    else:
-        ollama_running = await core.llm.is_available()
-    if hasattr(core.llm, "model_catalog"):
-        catalog = await core.llm.model_catalog()
-        active = (
-            getattr(core.llm, "active_label", catalog.get("provider"))
-            if catalog.get("chat_available") else "unavailable"
-        )
-    else:
-        active = getattr(core.llm, "active_label", "Vednix Engine")
+async def status(
+    onboarding: OnboardingService = Depends(get_onboarding),
+    users=Depends(get_users),
+    providers: ProviderService = Depends(get_providers),
+    core=Depends(get_core),
+) -> dict:
+    result = await onboarding.status()
+    rows = await providers.list_configured()
+    snapshot = await core.llm.status_snapshot() if hasattr(core.llm, "status_snapshot") else {}
+    active_id = snapshot.get("active_provider")
     return {
-        **state,
+        **result,
         "auth_enabled": await users.auth_enabled(),
-        "ollama_running": ollama_running,
-        "active_provider": active,
+        "providers": rows,
+        "active_provider": REGISTRY[active_id].label if active_id in REGISTRY else "unavailable",
+        "chat_available": bool(snapshot.get("chat_available", False)),
     }
 
 
 @router.post("/mode")
-async def choose_mode(body: ModeChoiceIn,
-                      onboarding: OnboardingService = Depends(get_onboarding)) -> dict:
-    return await onboarding.choose_mode(body.mode)
+async def choose_mode(
+    body: ModeChoiceIn,
+    onboarding: OnboardingService = Depends(get_onboarding),
+) -> dict:
+    try:
+        return await onboarding.choose_mode(body.mode)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/complete")
@@ -77,14 +48,7 @@ async def complete(onboarding: OnboardingService = Depends(get_onboarding)) -> d
     return await onboarding.complete()
 
 
-@router.get("/local-models")
-async def local_models() -> dict:
-    return {"models": RECOMMENDED_MODELS}
-
-
 @router.post("/wipe-data")
 async def wipe_data(memory=Depends(get_memory)) -> dict:
-    """One button, everything the local user typed — every conversation and
-    long-term memory — gone. Files/KB survive by design (they were added
-    file-by-file, on purpose)."""
+    """Delete conversations and long-term memories; leave uploaded user files intact."""
     return await memory.wipe_chats_and_memories()

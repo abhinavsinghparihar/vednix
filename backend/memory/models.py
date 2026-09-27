@@ -193,10 +193,34 @@ class ProviderKey(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
 
 
+class ProviderModel(Base):
+    """A live provider model and the result of a server-side capability probe.
+
+    The provider's current model list is still fetched from its official API;
+    these rows only cache validation results to avoid probing on every request.
+    """
+
+    __tablename__ = "provider_models"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_uuid)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    model_id: Mapped[str] = mapped_column(String(200))
+    display_name: Mapped[str] = mapped_column(String(255), default="")
+    capabilities: Mapped[str] = mapped_column(Text, default="{}")
+    context_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    available: Mapped[bool] = mapped_column(Boolean, default=False)
+    reason: Mapped[str] = mapped_column(String(300), default="")
+    latency_ms: Mapped[float | None] = mapped_column(nullable=True)
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("uq_provider_model", "provider", "model_id", unique=True),)
+
+
 class AppSetting(Base):
     """Tiny typed key-value table for app-level state that is data, not
-    config: onboarding completion, run mode (free|cloud|demo), provider
-    priority order, demo-mode flag. Server-owned, survives restarts."""
+    config: onboarding completion, run mode, and provider priority order.
+    Server-owned, survives restarts."""
 
     __tablename__ = "app_settings"
 

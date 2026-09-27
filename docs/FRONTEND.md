@@ -1,267 +1,34 @@
-# Vednix AI — Frontend
+# Frontend guide
 
-Next.js 15 (App Router) · TypeScript strict · Tailwind CSS v4 · Zustand · Framer Motion
-→ production build: `npm run build` · dev: `npm run dev` (http://localhost:3000)
+The frontend is a Next.js App Router application using TypeScript, React, Tailwind CSS, Framer Motion, and Zustand. The existing `/ws/chat` WebSocket is the single streaming chat transport.
 
-## Composition
+## Main routes
 
-```
-app/page.tsx                      landing identity — "The Living Core" (server comp)
- ├─ landing/LandingNav            floating glass pill nav · staggered mobile overlay
- ├─ landing/Hero                  manifesto · ask-capsule (→ /chat prefilled) · stats
- ├─ landing/OrbStage              live 8-state Orb cycle · orbit rings · glass badges
- ├─ landing/Capabilities          6 honest shipped-feature cards (mono engine tags)
- ├─ landing/EnterSection          real 3-command setup card (copy button) · CTA
- └─ landing/LandingFooter         wordmark · promises · ©
-app/layout.tsx                    theme bootstrap (blocking <head> script)
- │                                · BootGate wrap (session intro, once/session)
-app/chat/page.tsx                 workspace OS — Rail + 4 views (AnimatePresence)
- ├─ brand/BootGate                Orb ignition · wordmark · framed signature
- │                                · hairline progress · curtain lift · skip
- ├─ brand/ThemeToggle             sun⇄moon rotate-fade swap (rail + landing nav)
- ├─ workspace/Rail                62px floating glass-liquid dock · view switch
- │                                · theme toggle · vertical creator signature
- ├─ workspace/DashboardView       bilingual greeting · ask capsule · 4 real
- │                                stat cards · Continue list · live core card
- ├─ workspace/KnowledgeView       KB docs add/search(FTS5 «» snippets)/delete
- ├─ workspace/MemoryView          long-term memory add/list/delete
- ├─ background/NeuralBackground   particle synapse canvas (paused when tab hidden)
- ├─ background/MouseGlow          cursor-trailing gold halo (lerped, rAF)
- ├─ sidebar/Sidebar               brand · search · pin/rename/delete · health footer
- ├─ Topbar                        title inline-rename · CoreState label + mini orb
- ├─ chat/ChatView                 streaming list (useDeferredValue, bottom-pinning)
- ├─ chat/EmptyState               hero orb + bilingual first-impression + chips
- ├─ chat/MessageBubble            user/assistant/system rows · copy · regenerate
- ├─ chat/Markdown                 GFM · tables · hljs gold theme · copy header
- │                                · Mermaid (lazy import — 500KB opt-in only)
- ├─ composer/Composer             autogrow glass input · Enter/Shift+Enter
- │                                · send⇄stop morph · 32k char counter
- └─ controls/ControlPanel         model · temperature · language · voice · agents
+- `/` — product landing page and workspace entry.
+- `/login`, `/signup` — account authentication.
+- `/onboarding` — initial workspace setup and Gemini/Groq provider connection.
+- `/chat` — workspace shell, conversation sidebar, chat stage, composer, and Studio controls.
+- `/settings` — provider keys, live model discovery, task checks, priorities, memory/privacy and account settings.
+- `/profile` — account and session management.
+
+## State and provider selection
+
+`store/chat.ts` owns the active conversation, messages, draft attachments, WebSocket lifecycle, selected provider, current model options, and model-per-provider preferences. Switching provider/model does not clear the conversation or attachments. Provider model catalogs are fetched from the backend; API keys are never stored in frontend state, browser storage, or public environment variables.
+
+`lib/api.ts` handles workspace REST APIs; `lib/authApi.ts` handles account/provider APIs; `lib/ws.ts` implements the single chat WebSocket protocol. `lib/config.ts` selects localhost for loopback development and the configured API/WS base for deployment.
+
+## Mobile workspace
+
+The chat stage uses `min-w-0` sizing and a full-width composer on narrow viewports. The conversation sidebar defaults closed on phone widths and opens as a dismissible drawer. The Studio defaults closed on compact viewports and opens as a dismissible bottom sheet with a close button, backdrop, and Escape handling. Both controls remain in the Zustand store so opening/closing overlays preserves the active chat.
+
+Check mobile layouts at 320, 375, 390, and 430 CSS pixels; the composer controls remain available, messages can wrap, and horizontal overflow is avoided.
+
+## Development checks
+
+```bash
+npm ci
+npm run typecheck
+npm run build
 ```
 
-## Routes
-
-`/` — the landing identity. Its centerpiece is the actual 8-state Vednix Orb
-performing live (cycling CoreStates every ~1.9s) instead of a stock video —
-the same asset the workspace renders from WebSocket `state_changed` frames.
-The "ask" capsule bridges a question into `/chat` via a one-shot
-sessionStorage hand-off (consumed by Composer on mount).
-
-`/chat` — the workspace OS. A floating glass **Rail** (left edge) switches
-four views with `AnimatePresence mode="wait"` transitions:
-**dash** (default — greeting, real stats, ask capsule, continue, live core),
-**chat** (sidebar · stage · composer · studio panel), **knowledge** (KB with
-FTS5 search), **memory** (long-term store). The dashboard ask capsule reuses
-the same sessionStorage hand-off as the landing one. A pending hand-off is
-treated as explicit intent to compose: the landing capsule calls
-`setView("chat")` before routing (client-side nav keeps the store), and the
-`/chat` mount guard forces `view: "chat"` whenever `vednix.ask` is still
-unconsumed (hard refresh / direct arrival), so the question always lands in
-the Composer.
-
-### Dual theme — Obsidian (dark, default) & Ivory (light)
-
-Tailwind v4 resolves `@theme` token **variables** at runtime, so
-`html[data-theme="light"]` simply redefines the palette
-(`--color-void: #f4f0e6` paper · `panel: #ffffff` · bronze `gold: #a97e2c` ·
-ink `cream: #221b0e` · `muted: #6e6350` · `faint: #9a8d74`) and every glass /
-gradient / skeleton utility re-skins with **zero component changes**. Light
-overrides live in one block in `globals.css`; code blocks keep a dark
-background in both modes (intentional contrast anchor). `lib/theme.ts` +
-a blocking inline `<head>` script stamp `data-theme` before first paint
-(localStorage `vednix.theme` → `prefers-color-scheme` → dark), so there is
-no theme flash. `brand/ThemeToggle.tsx` switches with a sun⇄moon rotate-fade
-and sits in the Rail and the landing nav (desktop + mobile).
-
-### Session boot — "the site opens cool"
-
-`brand/BootGate.tsx` wraps the app in `layout.tsx` and plays **once per
-session** (`sessionStorage vednix.booted`): the Orb ignites in LISTENING, the
-wordmark springs in, the framed creator signature fades, a gold hairline
-progress bar sweeps, then the whole curtain slides up (`.75s` EASE_CURVE).
-Click anywhere to skip; `prefers-reduced-motion` bypasses it entirely. Probes
-and e2e can pre-set the flag via `add_init_script` to skip the intro.
-
-### Creator signature (premium branding)
-
-`lib/brand.ts` is the single source of truth: `BRAND_NAME` (always primary)
-+ `CREATOR_NAME` → `CREATOR_SIGNATURE` ("Made by Abhinav Singh").
-`components/brand/Signature.tsx` renders it in exactly one style — mono
-micro-caps, faint ink, optional gold-hairline `framed` variant — so the
-signature never drifts. Placements: global loading splash
-(`app/loading.tsx`), session boot curtain, landing hero edge anchor, landing
-footer, landing mobile menu, **Rail** (vertical `writing-mode: vertical-rl`),
-workspace sidebar footer, EmptyState close, dashboard core card, and the
-Studio panel's About block. The backend mirrors it via `GET /api/health`
-(`creator`, from `VEDNIX_CREATOR_NAME`). Never larger, never louder.
-
-### Font pipeline (root-caused, do not regress)
-
-`@theme` tokens name concrete families (`--font-display: "Outfit"…`). Do NOT
-point them at `var(--font-inter)`: @theme variables live on `:root` while
-next/font's variable classes land on `<body>` — `var()` substitutes at the
-defining element and silently degrades the entire chain to UA serif.
-
-## Design tokens (app/globals.css)
-
-Dark (Obsidian, default): `--color-void/#050505 · charcoal · panel ·
-gold #e3b857 · gold-bright #f4d68a · ember #e8843c · cream #f5f0e6`.
-Light (Ivory): see *Dual theme* above — one block redefines the same tokens
-under `html[data-theme="light"]`. Shared utilities: `.glass`, `.glass-strong`,
-`.glass-liquid` (white-gradient liquid glass, themed per mode), `.gold-border`,
-`.text-gold-gradient`, `.skeleton`; `hljs` gold-on-charcoal theme.
-
-## State (store/chat.ts — Zustand)
-
-REST bootstraps (conversations/models/health); one `WSClient` per app with
-typed frames (`state_changed / message_started / token / message_done /
-conversation_created / title_updated / error`), auto-reconnect with backoff.
-View routing is a store concern: `view: WorkspaceView`
-(`"dash" | "chat" | "knowledge" | "memory"`, default `"dash"`) via
-`setView()`; `newChat()` / `selectConversation()` force `view: "chat"` so
-clicking a conversation always lands on the stage. Every right-panel control
-is real: model → WS payload, temperature → WS payload
-(backend-regression-tested), language → PATCH + system-prompt directive.
-
-## Voice (Phase 3)
-
-- **STT** `hooks/useSpeechRecognition.ts`: WebSpeech wrapper (feature-detected,
-  Chrome/Edge recommended). Mic locale follows conversation language — `hi-IN`
-  handles हिंदी + Hinglish in one stream. Interim results render live in the
-  composer; permission-denied and unsupported states are explicit.
-- **TTS** `lib/tts.ts` (singleton over `speechSynthesis`): OS voices, fully
-  offline; voice picker prefers neural/natural local voices; per-message speak
-  button + "Speak replies" auto-TTS (Studio panel) + speed slider + test voice.
-  `lib/speechText.ts` sanitizes markdown (code → "(code snippet)", tables
-  flattened) and sniffs Devanagari to pick hi-IN vs en-US per message.
-- **Orb arbitration** `store/chat.ts → useDisplayCoreState()`: local
-  `voiceState` (listening/speaking) overrides server `CoreState` — LISTENING
-  and SPEAKING animations, unreachable since the desktop app, now fire.
-
-## Notable disciplines
-
-- **Bundle:** `lucide-react`/`framer-motion` optimizePackageImports; Mermaid +
-  highlight language packs load on demand only.
-- **Perf:** canvases share rAF, DPR-capped at 2, hidden-tab pause, particle
-  count scaled to viewport; message bubbles are `memo`'d; streaming uses
-  `useDeferredValue`.
-- **A11y:** reduced-motion respected everywhere; aria labels on every control;
-  keyboard-first composer.
-- **Honesty:** internet/agents toggles remain visibly disabled with phase
-  badges — no fake features.
-
-## Phase 4 — files, vision & knowledge (shipped)
-
-- **Composer attach is real:** `input[type=file]` → immediate `POST /api/uploads`
-  → draft chips (name · human size · remove) above the input; send passes the
-  uploaded ids in `WSUserMessage.attachments`; sent chips render on the user
-  bubble from the persisted `attachments` JSON (survives reload).
-- **Drag & drop:** a page-level drop overlay accepts any supported file.
-- **Vision honesty:** images attach fine; the backend auto-routes to an
-  installed vision model with a `🖼 Routed images to …` notice, or replies with
-  an exact `ollama pull …` fix when none is local.
-- **Knowledge Base is a first-class view** (Rail → knowledge, promoted out of
-  the Studio panel): add document (file picker reuses the upload pipeline:
-  pdf/docx/xlsx/csv/pptx/txt/md), list with chunk counts, remove, and
-  **FTS5 search** (`GET /api/knowledge/search`) rendering `«»`-marked
-  snippets. Hits injected into answers surface as `kb_sources` chips on the
-  reply.
-- **Memory is a first-class view** (Rail → memory): add/list/delete
-  long-term memories; the dashboard stat card shows the live count.
-- **Studio → Voice (Phase 3):** speak-replies toggle + speed slider + test.
-
-## Phase 6 — multi-agent mode (shipped)
-
-- **Multi-agent switch is real** in Studio → Capabilities (was the last Phase
-  badge — every toggle in the product is now functional). It implies web
-  research even when the Internet switch is off; the backend routes
-  `multi_agent` to the deep LangGraph loop.
-- **Live agent trace:** `agent_step` WS frames stack as step chips (plan →
-  search → fetch → critique → refine → build) above the reply; the latest chip
-  pulses while the agents work, the full trace stays on the message.
-- Sources continue to render as gold citation links under the reply.
-
-## Phase 7 — accounts, onboarding & run modes (shipped)
-
-```
-app/login/page.tsx          split-screen lock (AuthShell) · user-or-email · remember-me
- │                          · forgot view (offline reset CLI) · quick CTAs guest/ollama/cloud
-app/signup/page.tsx         name · derived username · live email check · strength meter · terms
-app/onboarding/page.tsx     ceremony: welcome → mode (free/cloud/guest/demo link) → wizard → done
- ├─ onboarding/OllamaWizard explain→download→install→connect(2.5s auto-detect)+model picker
- └─ onboarding/CloudWizard  provider grid → guided save→verify per provider
-app/profile/page.tsx        monogram hero · stat cards · compute(+VRAM) · devices+revoke
- │                          · change password (revokes all) · guest wipe variant
-app/settings/page.tsx       11 tabs: General·Appearance·Language·Voice·AI Models·Ollama
- │                          ·API Keys·Memory·Privacy·Experimental·About (+ mobile bottom bar)
-components/auth/            AuthShell (manifesto split) · fields (animated inputs/errors)
-lib/tokenVault.ts           access token lives ONLY in module memory; single-flight refresh;
-                            credentialed apiFetch + one 401 retry + CSRF double-submit
-store/auth.ts               onboarding/session bootstrap · lib/useGuard.ts = THE routing law
-```
-
-### The routing law (lib/useGuard.ts)
-backend down → allow (workspace shows offline UI) · setup incomplete → /onboarding ·
-locked world (accounts exist, no session) on /profile /settings → /login?next=… ·
-/chat self-guards (locked → /login?next=/chat) · guests roam a ZERO-ACCOUNT machine
-(open local mode, Vednix's original default).
-
-### Run modes (server-owned: app_settings)
-free / cloud / guest complete setup. demo additionally flips demo_active: the
-workspace opens as a tour while the WS engine answers `{error: demo_mode}` and
-persists nothing; picking any real mode clears the gate atomically (chat's
-"Connect AI" CTAs land on /onboarding). guest = real local chat, temporary
-history (profile ⋮ wipe). Deep links: /chat?view=dash|chat|knowledge|memory.
-Ribbons in the chat view mirror the active mode.
-
-## Phase 8 — NO SIGNUP NO ENTRY, admin console & the Neural-V brand (shipped)
-
-```
-app/login/page.tsx          THE gate — account only. Quick-CTA strip deleted;
-                            docstring states the law: "no account, no workspace".
-app/chat/page.tsx           guard is now session !== "authed" → /login?next=/chat;
-                            demo ribbon, guest ribbon and the resting-composer card
-                            are deleted — the composer is simply always the composer.
-app/onboarding/page.tsx     MODES = free · cloud (only). The done stage routes to
-                            /chat when auth is off, else /signup ("Create your account").
-components/onboarding/      OllamaWizard keeps a single honest attribution line —
-                            "built on the open Ollama runtime"; everything else
-                            says Vednix Engine.
-app/profile/page.tsx        guest variant deleted entirely (authed-only tree);
-                            the data section keeps "wipe this device" (now /wipe-data).
-app/settings/page.tsx       12 tabs: the Ollama tab is now "Engine" (id `engine`);
-                            NEW "Admin" tab — rendered only when me.role === "owner".
-                            AdminPanel: users table (monogram · role chip · live
-                            sessions), inline password reset, per-user sign-out,
-                            remove with inline confirm; the last owner shows
-                            "immortal" and refuses removal honestly.
-lib/useGuard.ts             the law, restated: backend down → allow (banner) ·
-                            setup incomplete → /onboarding · !authed anywhere
-                            except /login /signup /onboarding → /login?next=…
-store/auth.ts               SessionState "guest" is now "anon" — a locked-world
-                            no-account visitor, redirected, never roaming.
-```
-
-### The brand layer
-
-- `components/brand/LogoMark.tsx` — the **Neural V**: three glowing gold nodes
-  on a V constellation with two energy pulses riding the synapses. Hand-coded
-  SMIL animation (zero JS, server-safe), mounted through the single choke
-  point `Wordmark` (landing nav · footer · auth shell · boot gate ·
-  onboarding · sidebar · loading) plus the workspace `Rail` tile. The logo is
-  in motion everywhere it appears.
-- `components/brand/Signature.tsx` — `TricolorSignatureText`: "Made" in
-  saffron, "by" in cream, "Abhinav Singh" in India green — used at every
-  signature placement (16 surfaces + the vertical rail strip).
-- String scrub: the UI never says "offline" or "Ollama" as a brand anymore —
-  Engine / Vednix Engine / "your machine". Internal identifiers (`"ollama"`
-  provider id, `ollama pull` commands) stay real by design.
-
-### One-click launcher (scripts/launch.py + start.bat / start.sh)
-
-Eight narrated steps — python check → backend venv+deps → node check →
-frontend install+build → engine auto-install (winget / brew / official
-script) → engine serve + `qwen2.5:3b` pull → backend+frontend start →
-health-wait + browser open. Logs land in `logs/`; Ctrl+C stops everything.
-No third-party Python deps — stdlib only, so it runs anywhere 3.11+ runs.
-
+Do not expose server provider keys through `NEXT_PUBLIC_*`. The browser receives only validated model identifiers, provider status, safe error details, and non-reversible key hints.

@@ -1,63 +1,112 @@
-"""AI provider routes — catalog (public registry data), configured keys
-(hints only, NEVER ciphertext), verify (real network proof), enable/disable,
-priority order, and Ollama's live status for the setup wizard."""
+"""Provider setup, encrypted-key management, live model discovery and checks."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from ai_engine.provider_error import ProviderError
 from api.deps import get_core, get_providers
-from api.schemas import PriorityIn, ProviderKeyIn, ProviderToggleIn
+from api.schemas import ModelValidateIn, PriorityIn, ProviderKeyIn, ProviderToggleIn
 from services.providers import ProviderService, provider_catalog
 
 router = APIRouter(tags=["providers"])
 
 
+def _provider_http_error(exc: ProviderError) -> HTTPException:
+    status = exc.http_status or (401 if exc.authentication_error else 502)
+    return HTTPException(status_code=status, detail=exc.message)
+
+
 @router.get("/catalog")
-async def catalog(core=Depends(get_core)) -> dict:
-    """Setup-wizard data: public provider and text-model metadata only."""
-    return {"providers": provider_catalog(core.settings)}
+async def catalog() -> dict:
+    """Small product/provider metadata; models are never hardcoded here."""
+    return {"providers": provider_catalog()}
 
 
 @router.get("")
 async def configured(providers: ProviderService = Depends(get_providers)) -> dict:
-    priority = await providers.get_priority()
-    return {"providers": await providers.list_configured(), "priority": priority}
+    return {
+        "providers": await providers.list_configured(),
+        "priority": await providers.get_priority(),
+    }
 
 
 @router.put("/{provider}/key", status_code=200)
-async def upsert(provider: str, body: ProviderKeyIn,
-                 providers: ProviderService = Depends(get_providers)) -> dict:
-    """Store (or rotate) a key. Request body carries it ONCE; the response
-    carries only the fingerprint. Plaintext retention time: microseconds."""
+async def upsert(
+    provider: str,
+    body: ProviderKeyIn,
+    providers: ProviderService = Depends(get_providers),
+) -> dict:
+    """Encrypt a key and return only its hint/status — never the key itself."""
     try:
-        return await providers.upsert_key(
-            provider, api_key=body.api_key, base_url=body.base_url, model=body.model
-        )
+        return await providers.upsert_key(provider, api_key=body.api_key, model=body.model)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/{provider}/key", status_code=204)
 async def remove(provider: str, providers: ProviderService = Depends(get_providers)) -> None:
-    ok = await providers.remove_key(provider)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Nothing stored for this provider.")
+    if not await providers.remove_key(provider):
+        raise HTTPException(status_code=404, detail="Nothing is stored for this provider.")
 
 
 @router.post("/{provider}/verify")
-async def verify(provider: str, providers: ProviderService = Depends(get_providers),
-                 core=Depends(get_core)) -> dict:
-    """The green-check moment in the wizard: a real, timed API round-trip."""
+async def verify(
+    provider: str,
+    providers: ProviderService = Depends(get_providers),
+    core=Depends(get_core),
+) -> dict:
     try:
         return await providers.verify(provider, settings=core.settings)
+    except ProviderError as exc:
+        raise _provider_http_error(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@router.get("/{provider}/models")
+async def models(
+    provider: str,
+    task: str = Query(default="text"),
+    force: bool = Query(default=False),
+    providers: ProviderService = Depends(get_providers),
+    core=Depends(get_core),
+) -> dict:
+    """Fetch the provider's live list and return only models validated for task."""
+    try:
+        return await providers.model_catalog(
+            provider, settings=core.settings, task=task, force=force,
+        )
+    except ProviderError as exc:
+        raise _provider_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/{provider}/models/validate")
+async def validate_model(
+    provider: str,
+    body: ModelValidateIn,
+    providers: ProviderService = Depends(get_providers),
+    core=Depends(get_core),
+) -> dict:
+    try:
+        info = await providers.validate_model(
+            provider, body.model_id, settings=core.settings, task=body.task, force=True,
+        )
+        return info.public()
+    except ProviderError as exc:
+        raise _provider_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.post("/{provider}/toggle")
-async def toggle(provider: str, body: ProviderToggleIn,
-                 providers: ProviderService = Depends(get_providers)) -> dict:
+async def toggle(
+    provider: str,
+    body: ProviderToggleIn,
+    providers: ProviderService = Depends(get_providers),
+) -> dict:
     try:
         ok = await providers.set_enabled(provider, body.enabled)
     except ValueError as exc:
@@ -68,20 +117,8 @@ async def toggle(provider: str, body: ProviderToggleIn,
 
 
 @router.put("/priority")
-async def priority(body: PriorityIn, providers: ProviderService = Depends(get_providers)) -> dict:
+async def priority(
+    body: PriorityIn,
+    providers: ProviderService = Depends(get_providers),
+) -> dict:
     return {"priority": await providers.set_priority(body.order)}
-
-
-@router.get("/ollama/status")
-async def ollama_status(providers: ProviderService = Depends(get_providers),
-                        core=Depends(get_core)) -> dict:
-    """The wizard's auto-detector: is Ollama serving, and what's installed."""
-    result = await providers.verify("ollama", settings=core.settings)
-    return {
-        "running": bool(result["running"]),
-        "models": result["models"],
-        "default_model": result["verification_model"],
-        "model_available": result["model_available"],
-        "chat_available": result["model_available"],
-        "detail": result["detail"],
-    }

@@ -1,27 +1,66 @@
-"""Curated model ids whose documented operation is text generation.
+"""Provider-neutral model metadata and task capability filtering.
 
-Gemini's `/models` endpoint also lists audio, music, embedding and live models.
-Those names are not interchangeable with a text chat-completions model, so the
-provider adapter intersects the live list with this text-chat allowlist.
+The model identifiers and limits come from each provider's live API. A model
+is marked usable only after the server-side adapter validates the operation.
 """
 
-GEMINI_DEFAULT_MODEL = "gemini-3.8-flash"
+from __future__ import annotations
 
-# Stable Gemini API models that support text input and text output. Live model
-# discovery further narrows this list to models available to the configured key.
-GEMINI_TEXT_MODELS: tuple[str, ...] = (
-    GEMINI_DEFAULT_MODEL,
-    "gemini-3.7-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-)
+from dataclasses import asdict, dataclass
+from typing import Literal
+
+ModelTask = Literal[
+    "text", "vision", "audio_input", "audio_output", "image_generation", "video", "tools",
+]
+
+
+@dataclass(frozen=True)
+class ModelCapabilities:
+    text: bool = False
+    vision: bool = False
+    audioInput: bool = False
+    audioOutput: bool = False
+    imageGeneration: bool = False
+    video: bool = False
+    tools: bool = False
+
+    def supports(self, task: ModelTask) -> bool:
+        if task == "text":
+            return self.text
+        if task == "vision":
+            return self.text and self.vision
+        if task == "audio_input":
+            return self.audioInput
+        if task == "audio_output":
+            return self.audioOutput
+        if task == "image_generation":
+            return self.imageGeneration
+        if task == "video":
+            return self.video
+        if task == "tools":
+            return self.text and self.tools
+        return False
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    id: str
+    provider: str
+    displayName: str
+    capabilities: ModelCapabilities
+    contextWindow: int | None = None
+    maxOutputTokens: int | None = None
+    available: bool = False
+    reason: str | None = None
+    latencyMs: float | None = None
+    checkedCapabilities: tuple[str, ...] = ()
+
+    def public(self) -> dict:
+        value = asdict(self)
+        value["checkedCapabilities"] = list(self.checkedCapabilities)
+        return value
 
 
 def normalize_gemini_model(model: str) -> str:
-    """Google's model-list API may prefix ids with `models/`; chat uses bare ids."""
-    value = model.strip()
-    return value.removeprefix("models/")
+    """Normalize the resource-name prefix returned by the official Gemini API."""
+    return model.strip().removeprefix("models/")

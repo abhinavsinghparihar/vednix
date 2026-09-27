@@ -1,4 +1,4 @@
-"""Pydantic DTOs — every request validated before it touches the engine (audit SEC4)."""
+"""Pydantic DTOs — every request is validated before reaching the engine."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
-# --- REST: conversations -----------------------------------------------------
 
 class ConversationCreate(BaseModel):
     title: str | None = Field(default=None, max_length=200)
@@ -20,7 +18,7 @@ class ConversationUpdate(BaseModel):
     pinned: bool | None = None
     folder: str | None = Field(default=None, max_length=120)
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
-    model: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=200)
 
 
 class MessageOut(BaseModel):
@@ -47,8 +45,6 @@ class ConversationDetail(ConversationOut):
     messages: list[MessageOut]
 
 
-# --- REST: long-term memory ----------------------------------------------------
-
 class MemoryCreate(BaseModel):
     content: str = Field(min_length=1, max_length=4000)
     kind: Literal["note", "preference", "project", "task"] = "note"
@@ -61,12 +57,9 @@ class MemoryOut(BaseModel):
     created_at: datetime
 
 
-# --- REST: health/models --------------------------------------------------------
-
 class HealthOut(BaseModel):
     status: str
-    provider: str = "ollama"
-    ollama_available: bool
+    provider: str = "unavailable"
     default_model: str
     assistant: str
     creator: str = "Abhinav Singh"
@@ -77,8 +70,6 @@ class HealthOut(BaseModel):
     model_available: bool = False
     active_provider: str | None = None
 
-
-# --- REST: uploads & knowledge (Phase 4) -----------------------------------------
 
 class UploadOut(BaseModel):
     id: str
@@ -98,20 +89,18 @@ class KnowledgeDocOut(BaseModel):
     created_at: datetime
 
 
-# --- WebSocket payloads ----------------------------------------------------------
-
 class WSUserMessage(BaseModel):
     type: Literal["user_message"]
     content: str = Field(min_length=1)
     conversation_id: str | None = None
     client_id: str | None = None
-    model: str | None = None
-    provider: str | None = Field(default=None, max_length=32)
+    model: str | None = Field(default=None, max_length=200)
+    provider: Literal["gemini", "groq"] | None = None
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
-    attachments: list[str] = Field(default_factory=list, max_length=5)  # uploaded file ids
-    internet: bool = False  # Phase 5: run web research (SearXNG) before the LLM turn
-    multi_agent: bool = False  # Phase 6: planner→researcher→critic loop (implies web research)
+    attachments: list[str] = Field(default_factory=list, max_length=5)
+    internet: bool = False
+    multi_agent: bool = False
 
 
 class WSCancel(BaseModel):
@@ -121,8 +110,6 @@ class WSCancel(BaseModel):
 class WSPing(BaseModel):
     type: Literal["ping"]
 
-
-# --- REST: auth (Phase 7: onboarding + accounts) ------------------------------
 
 class RegisterIn(BaseModel):
     username: str = Field(min_length=3, max_length=32)
@@ -181,12 +168,9 @@ class SessionOut(BaseModel):
     created_at: datetime
 
 
-# --- REST: AI providers (Phase 7) ----------------------------------------------
-
 class ProviderKeyIn(BaseModel):
     api_key: str = Field(default="", max_length=512)
-    base_url: str | None = Field(default=None, max_length=500)
-    model: str | None = Field(default=None, max_length=160)
+    model: str | None = Field(default=None, max_length=200)
 
 
 class ProviderToggleIn(BaseModel):
@@ -194,14 +178,15 @@ class ProviderToggleIn(BaseModel):
 
 
 class PriorityIn(BaseModel):
-    order: list[str] = Field(min_length=1, max_length=16)
+    order: list[str] = Field(min_length=1, max_length=8)
 
 
-# --- REST: onboarding (Phase 7) --------------------------------------------------
+class ModelValidateIn(BaseModel):
+    model_id: str = Field(min_length=1, max_length=200)
+    task: Literal[
+        "text", "vision", "audio_input", "audio_output", "image_generation", "video", "tools",
+    ] = "text"
+
 
 class ModeChoiceIn(BaseModel):
-    mode: Literal["free", "cloud"]
-
-
-class OllamaDefaultModelIn(BaseModel):
-    model: str = Field(min_length=1, max_length=120)
+    mode: Literal["cloud"]

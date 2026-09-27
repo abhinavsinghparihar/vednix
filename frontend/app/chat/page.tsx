@@ -120,7 +120,7 @@ function WorkspacePage() {
         {view === "chat" ? (
           <motion.section
             key="chat"
-            className="relative flex min-w-0 flex-1"
+            className="relative flex w-full min-w-0 flex-1"
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}

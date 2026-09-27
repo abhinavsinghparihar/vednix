@@ -15,8 +15,8 @@ Root fixes vs. the original:
 
 Phase 4 additions on top of that same single pipeline:
   - chat attachments: extracted file text, budgeted, injected into the LLM turn
-  - vision routing: images auto-pick a vision-capable local model, or the user
-    gets a precise `ollama pull …` instruction instead of a silent failure
+  - vision routing: images use only a model with a successful provider-side
+    capability probe, with a clear error when no compatible model is available
   - knowledge base: FTS5 hits are cited into the turn; sources ride the done frame
 """
 
@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, AsyncIterator, Protocol
 
 from ai_engine.events import CoreState, EventBus, StateManager
-from ai_engine.ollama_client import OllamaError
+from ai_engine.provider_error import ProviderError
 from ai_engine.prompts import build_system_prompt
 from agents.base import PluginContext
 from core.logging import get_logger
@@ -42,14 +42,14 @@ logger = get_logger(__name__)
 
 
 class LLMClient(Protocol):
-    """Anything with the original OllamaClient interface qualifies (OpenRouter later)."""
+    """Provider-neutral chat interface backed by server-side credentials."""
 
     model: str
 
     async def is_available(self, provider: str | None = None) -> bool: ...
-    async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None) -> str: ...
+    async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> str: ...
     def chat_stream(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> AsyncIterator[str]: ...
-    async def list_models_cached(self, ttl: float = 30.0, provider: str | None = None) -> list[str]: ...
+    async def list_models_cached(self, ttl: float = 30.0, provider: str | None = None, *, task: str = "text") -> list[str]: ...
 
 
 @dataclass
@@ -157,30 +157,25 @@ class EngineSession:
             yield result
             return
 
-        # 3. LLM path. Separate provider-specific readiness from backend liveness;
-        # explicit Gemini selection must not be short-circuited by local Ollama.
+        # 3. LLM path. Provider-specific readiness keeps explicit selection strict.
         availability = self.core.llm.is_available
         try:
             try:
                 ready = await availability(provider=provider)
-            except TypeError:  # compatibility with older injected/test clients
+            except TypeError:  # compatibility with injected test/stub clients
                 ready = await availability()
         except Exception:
             ready = False
         if not ready:
             await self.state.set(CoreState.IDLE)
-            reason = getattr(self.core.llm, "unavailable_message", None)
-            if reason is not None:
+            unavailable = getattr(self.core.llm, "unavailable_message", None)
+            if unavailable is not None:
                 try:
-                    message = await reason(provider)
+                    message = await unavailable(provider)
                 except Exception:
-                    message = "No verified AI provider is available. Check Settings → AI Providers."
+                    message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
             else:
-                message = (
-                    "I can't reach Ollama right now — try: `ollama serve` and "
-                    f"`ollama pull {self.core.llm.model}`. Everything else in Vednix "
-                    "keeps working offline."
-                )
+                message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
             yield message
             return
 
@@ -229,19 +224,11 @@ class EngineSession:
         )
         if no_vision:
             await self.state.set(CoreState.IDLE)
-            active = getattr(self.core.llm, "active_label", "Ollama")
-            if active == "Ollama":
-                yield (
-                    "Images need a vision-capable model. Quick fix:\n\n"
-                    "```bash\nollama pull llama3.2-vision\n```\n\n"
-                    "Then attach the image again — Vednix auto-routes to it."
-                )
-            else:
-                yield (
-                    f"Your active provider ({active}) has no vision-capable model "
-                    "in its list. Pick a vision model in the model selector, or "
-                    "switch to a local Ollama vision model."
-                )
+            active = getattr(self.core.llm, "active_label", "selected provider")
+            yield (
+                f"{active} has no model with a successful vision capability check. "
+                "Refresh the live vision model list in Settings → AI Providers, then select a validated vision model."
+            )
             return
         effective_model = routed_model or model or None
         if routed_model:
@@ -294,10 +281,10 @@ class EngineSession:
                     first = False
                 chunks.append(chunk)
                 yield chunk
-        except OllamaError as exc:
-            label = getattr(self.core.llm, "active_label", "AI provider")
-            logger.warning("LLM stream failed (provider=%s, conv=%s): %s", provider or label, self.conversation_id, exc)
-            yield f"\n\n⚠️ {label} could not complete this reply: {exc} This reply was not saved."
+        except ProviderError as exc:
+            label = exc.provider if exc.provider not in {"", "Vednix"} else getattr(self.core.llm, "active_label", "AI provider")
+            logger.warning("provider stream failed (provider=%s, conv=%s): %s", label, self.conversation_id, exc.message)
+            yield f"\n\n⚠️ {label} could not complete this reply: {exc.message} This reply was not saved."
         except Exception:
             logger.exception("unexpected engine error (conv=%s)", self.conversation_id)
             yield "\n\n⚠️ Something unexpected went wrong. Detail was logged."
@@ -313,14 +300,11 @@ class EngineSession:
         text: str,
         attachments: list[AttachmentRef],
         requested_model: str | None,
-        *, provider: str | None = None,
+        *,
+        provider: str | None = None,
     ) -> tuple[str, list[str], str | None, bool]:
-        """Returns (llm_user_content, images_b64, routed_model, no_vision_model).
-
-        - Text-bearing files become budgeted `### File:` blocks above the question.
-        - Images ride as base64 on the final user message; if the requested model
-          can't see, the first available local vision model takes over
-          (routed_model) — or no_vision_model=True surfaces the exact fix.
+        """Return enriched text, images, an optional validated model route,
+        and whether an explicitly selected provider has no validated vision model.
         """
         settings = self.core.settings
         if not attachments or self.core.files is None:
@@ -351,38 +335,31 @@ class EngineSession:
         routed_model: str | None = None
         no_vision = False
         if image_ids:
-            desired = requested_model or self.core.llm.model
-
-            async def can_see(m: str) -> bool:
-                """Client-aware vision check (cloud providers answer from their
-                registry flag via the router; bare stubs/ollama fall back to
-                the keyword list — audit-compatible either way)."""
+            # Automatic mode lets the router choose a validated vision-capable
+            # model across providers. An explicit provider can be rerouted only
+            # to another model validated for that same provider.
+            if provider:
+                desired = requested_model or self.core.llm.model
                 checker = getattr(self.core.llm, "supports_images", None)
-                if checker is not None:
+                can_see = False
+                if checker is not None and desired:
                     try:
-                        result = checker(m, provider=provider)
+                        result = checker(desired, provider=provider)
                     except TypeError:
-                        result = checker(m)
+                        result = checker(desired)
                     if inspect.isawaitable(result):
                         result = await result
-                    if result:
-                        return True
-                return settings.is_vision_model(m)
-
-            if await can_see(desired):
-                pass  # requested/default model can already see
-            else:
-                try:
-                    available = await self.core.llm.list_models_cached(provider=provider)
-                except TypeError:
-                    available = await self.core.llm.list_models_cached()
-                vision_models = []
-                for m in available:
-                    if await can_see(m):
-                        vision_models.append(m)
-                if not vision_models:
-                    return enriched, [], None, True
-                routed_model = vision_models[0]
+                    can_see = bool(result)
+                if not can_see:
+                    try:
+                        vision_models = await self.core.llm.list_models_cached(
+                            provider=provider, task="vision"
+                        )
+                    except TypeError:  # compatibility with injected test clients
+                        vision_models = await self.core.llm.list_models_cached()
+                    if not vision_models:
+                        return enriched, [], None, True
+                    routed_model = vision_models[0]
             for image_id in image_ids[:3]:  # cap: 3 images per turn
                 blob = await self.core.files.read_blob_base64(image_id)
                 if blob:

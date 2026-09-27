@@ -1,7 +1,7 @@
 /**
  * /login — the OS lock screen, cinematic edition. Email-or-username +
  * password, remember-me, animated validation and errors, forgot-password
- * recovery (honest local recovery — a machine-only app can't promise SMTP).
+ * recovery through configured email access or the backend administrator.
  * Rule of the house: NO SIGNUP, NO ENTRY — this screen is the only door.
  *
  * Keyboard: Enter/⌘↵ submits; Esc exits the forgot view.
@@ -106,7 +106,7 @@ function LoginInner() {
 
   if (view === "forgot") {
     return (
-      <AuthShell title="Recover access" subtitle="Local-first means your machine is the recovery channel.">
+      <AuthShell title="Recover access" subtitle="Use configured email access or contact the administrator of this Vednix backend.">
         <button
           onClick={() => setView("login")}
           className="mb-5 inline-flex items-center gap-1.5 text-xs text-faint transition-colors hover:text-gold-bright"
@@ -117,7 +117,7 @@ function LoginInner() {
         <div className="space-y-4 text-[13px] leading-relaxed text-muted">
           <div className="glass rounded-xl p-4">
             <p className="mb-2 flex items-center gap-2 font-semibold text-cream">
-              <TerminalSquare className="h-4 w-4 text-gold" /> On this machine
+              <TerminalSquare className="h-4 w-4 text-gold" /> Self-hosted backend
             </p>
             <p className="mb-3">Run Vednix's reset helper — it sets a new password and revokes every session:</p>
             <div className="flex items-center gap-2">
@@ -138,9 +138,7 @@ function LoginInner() {
             </div>
           </div>
           <p>
-            Email-based reset isn't offered because an app that lives wholly on
-            this machine can't promise SMTP. If you run Vednix behind a mail relay later, this
-            screen grows a real email flow off the same seam.
+            If you can access the account email, choose Email OTP on the sign-in screen. For a self-hosted deployment without email access, ask the backend administrator to run the reset helper on the server.
           </p>
         </div>
       </AuthShell>

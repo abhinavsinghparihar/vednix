@@ -89,17 +89,17 @@ async def test_attachment_skips_plugin_routing(core, memory, files_store):
 
 async def test_vision_guard_without_vision_model(core, memory, files_store):
     row = await files_store.save("screen.png", "image/png", PNG_BYTES)
-    llm = FakeLLM()  # model "fake-model" is not vision-capable; cache lists no vision model
+    llm = FakeLLM()  # no validated vision capability exists in this test stub
     conv = await memory.create_conversation()
     session = core(llm, files=files_store).create_session(memory, conv.id)
 
     reply = await collect(session.stream_reply(
         "what's on my screen?",
         attachments=[AttachmentRef(id=row.id, name=row.name, kind=row.kind, size=row.size)],
+        provider="gemini",
     ))
 
-    assert "vision-capable model" in reply
-    assert "ollama pull" in reply
+    assert "successful vision capability check" in reply
     assert llm.calls == []  # never called with a guess
     history = await memory.recent_history(conv.id, max_turns=5)
     assert [m["role"] for m in history] == ["user"]  # guidance never persisted (audit B2)
@@ -109,8 +109,11 @@ async def test_vision_auto_routes_to_available_vision_model(core, memory, files_
     row = await files_store.save("screen.png", "image/png", PNG_BYTES)
 
     class VisionAwareLLM(FakeLLM):
-        async def list_models_cached(self, ttl: float = 30.0):
-            return ["fake-model", "llama3.2-vision"]
+        async def list_models_cached(self, ttl: float = 30.0, provider: str | None = None, *, task: str = "text"):
+            return ["vision-model"] if task == "vision" else ["test-model"]
+
+        async def supports_images(self, model: str | None = None, provider: str | None = None) -> bool:
+            return model == "vision-model"
 
     llm = VisionAwareLLM()
     conv = await memory.create_conversation()
@@ -119,10 +122,11 @@ async def test_vision_auto_routes_to_available_vision_model(core, memory, files_
     reply = await collect(session.stream_reply(
         "describe this image",
         attachments=[AttachmentRef(id=row.id, name=row.name, kind=row.kind, size=row.size)],
+        provider="gemini",
     ))
 
-    assert "Routed images to `llama3.2-vision`" in reply
-    assert llm.last_model == "llama3.2-vision"
+    assert "Routed images to `vision-model`" in reply
+    assert llm.last_model == "vision-model"
     assert llm.last_images and len(llm.last_images) == 1  # base64 reached the LLM
 
 

@@ -32,9 +32,9 @@ export function ChatView() {
         const el = e.currentTarget;
         pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
       }}
-      className="no-scrollbar relative flex-1 overflow-y-auto px-4 md:px-8"
+      className="no-scrollbar relative min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-3 md:px-8"
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-5 py-6">
+      <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-5 py-4 sm:py-6">
         {loading ? (
           <div className="space-y-4 pt-4">
             {[...Array(3)].map((_, i) => (

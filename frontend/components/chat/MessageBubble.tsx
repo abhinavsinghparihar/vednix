@@ -84,7 +84,7 @@ export const MessageBubble = memo(function MessageBubble({
         )}
         <div
           className={cn(
-            "rounded-2xl px-4 py-3",
+            "min-w-0 break-words rounded-2xl px-4 py-3 [overflow-wrap:anywhere]",
             isUser
               ? "gold-border rounded-br-md text-cream"
               : "glass rounded-bl-md",

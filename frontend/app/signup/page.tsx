@@ -70,7 +70,7 @@ export default function SignupPage() {
     if (!emailOk) return setError("That email address doesn't look right.");
     if (password.length < 8) return setError("Password needs at least 8 characters.");
     if (password !== confirm) return setError("Passwords don't match.");
-    if (!terms) return setError("Please accept the local-first terms to continue.");
+    if (!terms) return setError("Please acknowledge how provider requests and saved keys are handled.");
 
     setLoading(true);
     setError(null);
@@ -103,7 +103,7 @@ export default function SignupPage() {
   return (
     <AuthShell
       title="Create your account"
-      subtitle="The first account owns this machine — it can lock the workspace, manage sessions, and control AI providers."
+      subtitle="The first account administers this workspace — it can manage users, sessions, and connected AI providers."
     >
       <form onSubmit={submit} className="space-y-4" noValidate>
         <AuthField
@@ -178,8 +178,7 @@ export default function SignupPage() {
         />
 
         <AuthCheck id="terms" checked={terms} onChange={setTerms}>
-          I understand Vednix is local-first — my data, keys and memories live
-          on this machine, and owning them is my responsibility.
+          I understand that chat content and selected attachments may be sent to the Gemini or Groq provider I choose, and that saved provider keys are encrypted by this backend.
         </AuthCheck>
 
         <AuthError message={error} />

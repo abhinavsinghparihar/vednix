@@ -1,102 +1,48 @@
-# Free deployment guide (current architecture)
+# Vercel + Render deployment
 
-## Important reality
+This guide uses the production origins reserved for Vednix:
 
-Vednix is local-first: Ollama and SQLite are designed to run on the user's own
-machine. A completely free public deployment can host the UI and a demo API,
-but it cannot provide reliable public Ollama inference or durable SQLite storage.
-Render's free filesystem is ephemeral and free services sleep after 15 minutes,
-so do not use its local SQLite/database for important data.
+- Frontend: `https://vednix.vercel.app`
+- Backend API: `https://vednix.onrender.com`
+- Backend WebSocket: `wss://vednix.onrender.com/ws/chat`
 
-## Recommended $0 split deployment for a demo
+## Vercel
 
-### 1. Backend on Render
+Set these frontend build-time environment variables for Production (and Preview only if the preview backend is intentionally configured for that origin):
 
-Create **New → Web Service** from the GitHub repository.
+```text
+NEXT_PUBLIC_API_BASE=https://vednix.onrender.com
+NEXT_PUBLIC_WS_BASE=wss://vednix.onrender.com/ws/chat
+```
 
-- Root directory: `backend`
-- Runtime: Python 3
+The Next.js client reads these at build time. Redeploy after changing them. Never place Gemini/Groq keys, backend auth secrets, or any other credential in `NEXT_PUBLIC_*`.
+
+## Render backend
+
+Create a Python web service using `backend/` as its root directory.
+
 - Build command: `pip install -r requirements.txt`
-- Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Plan: Free
+- Start command: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Health check path: `/api/health`
 
-Set environment variables:
+Set an explicit credentialed CORS allowlist. Origins contain scheme and host only—no wildcard and no path:
 
-```env
-VEDNIX_HOST=0.0.0.0
-VEDNIX_PORT=10000
-VEDNIX_CORS_ORIGINS=https://YOUR-VERCEL-DOMAIN.vercel.app
-VEDNIX_SEARXNG_URL=
-# Render cannot reach Ollama on your Windows PC. This loopback URL is
-# intentionally local to the Render container and will report Ollama offline.
-VEDNIX_OLLAMA_HOST=http://127.0.0.1:11434
-VEDNIX_OLLAMA_MODEL=qwen2.5:3b
-VEDNIX_GEMINI_MODEL=gemini-3.8-flash
-VEDNIX_DATABASE_URL=postgresql+asyncpg://...
+```text
+VEDNIX_CORS_ORIGINS=https://vednix.vercel.app,http://localhost:3000,http://127.0.0.1:3000,http://localhost:3001,http://127.0.0.1:3001
 ```
 
-For a disposable demo, SQLite can remain, but its data will be lost on restart.
-For durable users/providers/conversations, use a PostgreSQL service and add
-`asyncpg` to requirements before deployment. Never expose Ollama on an open
-public port without authentication.
+The application adds those local origins and the production Vercel origin to its validated allowlist. If the frontend domain changes, update the backend configuration and redeploy. WebSocket origins are checked against the same list.
 
-### 2. Frontend on Vercel
+Use persistent storage for the database, upload directory, and server secret. The current backend dependencies include SQLite support by default; a Render-managed PostgreSQL database also requires installing the matching async SQLAlchemy driver before setting `VEDNIX_DATABASE_URL`. The default SQLite database and local upload directory are suitable for development or a persistent disk; ephemeral filesystem deployments can lose local files between restarts. Set `VEDNIX_UPLOAD_DIR` to a persistent mount when uploads must survive restarts.
 
-Import the same GitHub repository in Vercel.
+Optional backend settings include `VEDNIX_REDIS_URL` for shared rate limiting, `VEDNIX_AUTH_TOKEN` for an additional bearer-token gate, SearXNG settings for research, and SMTP settings for email login. Use Render's secret environment variable facility for credentials. Gemini and Groq keys are deliberately entered in the authenticated Vednix Settings UI and encrypted by the backend; do not add them to Vercel variables or commit them.
 
-- Root directory: `frontend`
-- Framework: Next.js
-- Build command: `npm run build`
-- Output: default Next.js output
+## Verify after deployment
 
-Add:
+1. Open `https://vednix.onrender.com/api/health` and confirm the service is healthy.
+2. In the browser Network panel, confirm API and WebSocket requests target the configured Render origins—not `localhost`.
+3. Sign in, add a Gemini or Groq key in **Settings → API Keys**, and require a successful provider check before enabling it.
+4. Refresh **Settings → AI Models** to discover current models and run the task-specific validation.
+5. Test a text reply, then image routing only with a validated vision-capable model.
 
-```env
-NEXT_PUBLIC_API_BASE=https://YOUR-RENDER-SERVICE.onrender.com
-NEXT_PUBLIC_WS_BASE=wss://YOUR-RENDER-SERVICE.onrender.com/ws/chat
-```
-
-Redeploy after saving variables. Replace the placeholders with the real
-service/domain values from your Render and Vercel dashboards. Add the exact
-Vercel origin (scheme + hostname only, no path and no trailing wildcard) to
-`VEDNIX_CORS_ORIGINS`. It is comma-separated for multiple production/preview
-origins; credentialed CORS intentionally rejects `*`. The same exact origin
-allowlist protects `/ws/chat`, so a browser WebSocket from an unlisted Vercel
-origin is rejected rather than silently connecting.
-
-`NEXT_PUBLIC_API_BASE` must be the Render **backend origin**. The WebSocket
-base can be omitted because the frontend derives `wss://.../ws/chat` from that
-HTTPS API base, or set explicitly as shown. The repository's production default
-targets its configured Render backend; use these Vercel variables to override
-that default for another deployment. The frontend never falls back to the
-visitor's localhost in production.
-
-For Vercel-to-Render authentication, HTTPS refresh cookies use
-`SameSite=None; Secure`; the SPA bootstraps the double-submit CSRF nonce from
-`/api/auth/csrf` and holds it in memory. Browser privacy settings that block all
-cross-site cookies can still prevent refresh-cookie persistence; if that affects
-your users, use a same-site API hostname (for example, `api.YOUR-DOMAIN`) or a
-same-origin proxy. CORS cannot override a browser's third-party-cookie policy.
-
-Render cannot access Ollama on a developer's Windows PC. Keep the Render Ollama
-host at its container-local loopback address and let Vednix show it as
-unavailable; a verified cloud provider such as Gemini is then usable. For
-local development, the default remains `http://localhost:11434`.
-
-### 3. Cloud provider
-
-For public AI, configure Gemini/OpenRouter in Vednix's provider settings. Keys
-are sent to the backend and encrypted there; do not put them in Vercel
-`NEXT_PUBLIC_*` variables.
-
-### 4. Internet/deep search
-
-The current deep-research agent uses SearXNG. Run SearXNG privately or on a
-separate service and set `VEDNIX_SEARXNG_URL` to its HTTPS URL. An empty value
-intentionally disables search instead of faking results.
-
-## Best production-like option
-
-Keep the backend, Ollama, SQLite, API keys and data on the Windows machine and
-use a secure tunnel only when needed. This preserves the local-first promise,
-avoids free-host filesystem loss, and keeps Ollama private.
+No live provider verification can be claimed until a real user key passes the provider's check.

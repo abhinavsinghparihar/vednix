@@ -1,102 +1,46 @@
-# Vednix AI — Architecture
+# Vednix architecture
 
-> *"The Next Generation AI Workspace"* — offline-first, multilingual (Hindi / Hinglish / any language), streaming-native.
-> Successor to the `dev_ai` desktop prototype (see `docs/AUDIT_REPORT.md` for the forensic audit that shaped this design).
+Vednix is a web workspace backed by FastAPI. The browser retains the current Zustand chat state and connects over the existing WebSocket; the backend owns authentication, conversation persistence, encrypted provider credentials, live model validation, file storage, and provider routing.
 
-## System overview
-
-```
-┌─────────────── Frontend (Phase 2: Next.js) ────────────────┐
-│  glass sidebar · streaming chat · controls · AI Orb (WS)   │
-└───────────────┬────────────────────────────────────────────┘
-                │  REST /api/*  ·  WebSocket /ws/chat
-┌───────────────▼─────────────── backend/ (FastAPI, async) ──┐
-│ api/           conversations · memories · health/models    │
-│     ws_chat.py — receiver/dispatcher loop, cancel-capable  │
-│ ai_engine/     engine (ONE async generator) · ollama_client│
-│                · events (CoreState pub/sub) · prompts (§8) │
-│ agents/        Plugin contract · PluginManager · builtins  │
-│ memory/        SQLAlchemy async: Conversation/Message/Item │
-│ core/          logging · security (validation) · rate limit│
-└───────────────┬────────────────────────────────────────────┘
-                │  async httpx (keep-alive)
-        ┌───────▼────────┐      ┌──────────────────┐
-        │ Ollama (local) │      │ SQLite (WAL)     │
-        │ qwen2.5:3b …   │      │ → Postgres-ready │
-        └────────────────┘      └──────────────────┘
+```text
+Next.js workspace (Vercel or local)
+  ├─ REST: auth, conversation history, files, settings, live model checks
+  └─ WebSocket /ws/chat: one existing token-streaming chat transport
+        │
+FastAPI backend (Render or local)
+  ├─ auth/session + explicit credentialed CORS
+  ├─ EngineCore → ResilientLLM
+  │    ├─ Gemini adapter → official models.list + compatible chat generation
+  │    └─ Groq adapter   → official /models + compatible chat completions
+  ├─ task-specific capability probes, model cache, pre-token failover
+  ├─ SQLAlchemy: conversations, users, provider keys, validated model metadata
+  ├─ encrypted key vault + filesystem upload store
+  └─ optional LangGraph research backed by configured SearXNG
 ```
 
-## Design principles (born from the audit)
+## Provider boundary
 
-1. **One pipeline.** `EngineSession.stream_reply()` is the only message path. The
-   original had sync + stream copies that disagreed (audit B3/DUP1); there is now
-   exactly one — an async generator.
-2. **Persistence contract.** User turns always persist; assistant turns persist
-   only on success (or partial-on-cancel with a `*(stopped)*` marker); errors
-   and offline-notices are streamed to the UI but *never* stored (audit B2).
-3. **Per-session state.** `EngineCore` (shared: LLM client, plugins, settings)
-   spawns an `EngineSession` per conversation holding its own `StateManager` +
-   `EventBus` — two chats can never fight over one global orb state (audit SC5).
-4. **Plugin-first routing, all matches.** `PluginManager.find_handlers()` returns
-   every claimant by priority; the engine executes all and joins answers
-   (audit B4). Plugins are async, fail-soft, and logged (audit B9).
-5. **Language contract, explicitly.** `ai_engine/prompts.py` composes persona +
-   *CRITICAL LANGUAGE RULE* (mirror the user's language/script) or a forced
-   per-conversation directive (`hi` / `hinglish` / `en`), plus remembered facts.
-6. **Backpressure + validation at the edge.** Pydantic DTOs, 32k-char cap,
-   per-IP REST token bucket, per-connection WS bucket, one active generation per
-   connection (audit SEC4, SC6, B5).
+`backend/ai_engine/cloud_client.py` holds provider adapters and their HTTP handling. `model_catalog.py` normalizes model capabilities; `provider_error.py` converts upstream failures to safe, classified errors. `services/providers.py` is the boundary for provider metadata, encrypted keys, official model discovery, task probes, and cached validation. `services/resilient_llm.py` selects only verified and enabled providers.
 
-## Module map
+Provider setup metadata is a small fixed list containing only Gemini and Groq endpoints/labels. Model identifiers are fetched live. Candidate listings are not equivalent to verification: text, vision, and tool capability flags require successful operation-specific checks. Unsupported tasks remain unavailable unless a real check is implemented. Model data and API keys stay server-side.
 
-| Module | Responsibility | From dev_ai |
-|---|---|---|
-| `ai_engine/events.py` | 8-state CoreState + async bus/state manager | ♻️ ~95% |
-| `ai_engine/ollama_client.py` | async httpx Ollama (`chat`/`chat_stream`), error frames raise, health TTL cache | ♻️ interface kept |
-| `ai_engine/engine.py` | session pipeline: plugins → LLM, persistence contract, cancellation | 🔧 rewritten |
-| `ai_engine/prompts.py` | system prompt: persona, language rule/forced directive, memory facts | 🆕 (audit §8 core fix) |
-| `agents/*` | Plugin ABC + manager + time/system_info/memory builtins (Hindi triggers) | ♻️/🆕 |
-| `memory/models.py` | Conversation, Message, MemoryItem (WAL, FK, cascade) | 🔧 |
-| `memory/service.py` | async CRUD; long-term API `remember/search/all/forget` preserved 1:1 | 🔧 |
-| `core/*` | logging, input validation, token-bucket rate limiting | 🆕 (audit: zero logging before) |
-| `api/*` | REST DTOs + routers; WS protocol with cancel/title/creation frames | 🆕 |
+Automatic chat selects a compatible verified model from the saved priority list. It may fail over to another compatible provider only before any response token is emitted. User-selected provider/model requests remain strict. The router does not fan a request out to every configured model.
 
-## Streaming sequence
+## Chat and state
 
-```
-client ─ user_message ─▶ ws_chat ─ validate/rate-limit/resolve-conv
-       ◀─ conversation_created (if new)
-       ◀─ state_changed THINKING        (or EXECUTING for plugin route)
-       ◀─ message_started {message_id}
-       ◀─ token × N                     (SPEAKING on first token)
-( opt: ─ cancel ─▶ task cancelled ─ partial persisted "*(stopped)*" )
-       ◀─ message_done {plugins, cancelled}
-       ◀─ state_changed IDLE
-       ◀─ title_updated                 (first exchange only, background)
-```
+`EngineCore` enriches turns with stored history, selected attachments, memory, and optional knowledge/research context. `api/ws_chat.py` is the single streaming transport. The frontend's Zustand store owns the active conversation/messages, pending attachments, provider/model choices, and WebSocket status. Opening or dismissing the mobile Studio drawer does not reset the chat store.
 
-## Scaling path (baked in, not bolted on)
+## Persistence and security
 
-`RateLimiter`/`MemoryService` interfaces are process-local today, Redis/Postgres
-swappable without caller changes; `OLLAMA_*` and DB URL are env-driven; the LLM
-client is a Protocol — OpenRouter provider plugs into the same `chat/chat_stream`
-contract (Phase 5) exactly as the original README predicted.
+The default database is SQLite; deployment can set a supported SQLAlchemy async database URL. Uploaded files are stored under the configured upload directory. Provider API keys are encrypted at rest with a backend-held secret; public provider responses expose only a key hint and verification/status information. CORS and WebSocket origins use exact allowlists, including the production frontend and local development origins. Do not place provider secrets in frontend configuration or browser storage.
 
-## Multi-agent research (Phase 6)
+## Main code areas
 
-`agents/research/service.py` compiles two LangGraph state machines over the same
-agent nodes — deep mode is a *loop*, quick mode a *chain*:
-
-```
-quick:  plan → search → fetch → build → context block
-deep:   planner → search → fetch → critic ─┐
-             ▲                refine(follow_ups) ◄┘ verdicts unanswered & rounds left
-        (loop cap: VEDNIX_AGENTS_MAX_ITERATIONS)
-                    └→ build → context block
-```
-
-Invariants: retrieval only (synthesis stays in the engine's single streaming
-pipeline); JSON-contract agent I/O with salvage + treat-as-covered fallback (the
-graph always terminates); every node emits `(step, detail)` via `on_step` →
-engine → `agent_step` WS frames, so the orchestration is visible in the UI
-rather than a black box.
+- `frontend/app/` — landing, authentication, onboarding, workspace, settings, and profile routes.
+- `frontend/components/` — workspace, chat, composer, Studio, onboarding, and design system.
+- `frontend/store/chat.ts` — conversation/chat state and provider/model selection.
+- `backend/api/` — REST routes and the WebSocket endpoint.
+- `backend/ai_engine/` — adapters, model capabilities, errors, and engine.
+- `backend/services/providers.py` — encrypted provider setup and model validation.
+- `backend/services/resilient_llm.py` — provider/model routing and failover.
+- `backend/memory/` — persistence models and services.

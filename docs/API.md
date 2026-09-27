@@ -1,201 +1,74 @@
-# Vednix AI — API Reference
+# Vednix API reference
 
-Base URL: `http://localhost:8000` · Interactive docs: `/docs` (OpenAPI)
+The local API defaults to `http://localhost:8000`; interactive OpenAPI documentation is at `/docs`. Production frontend URLs are configured through `NEXT_PUBLIC_API_BASE` and `NEXT_PUBLIC_WS_BASE`.
 
-## REST
+## Provider management
+
+All provider management routes are under `/api/providers`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/health` | `{status, ollama_available, default_model, assistant, creator}` |
-| GET | `/api/models` | `{default, available[]}` — powers the model selector |
-| GET | `/api/conversations` | List (pinned first, then recent) |
-| POST | `/api/conversations` | Create `{title?, language: auto\|hi\|hinglish\|en}` → 201 |
-| GET | `/api/conversations/{id}` | Full chat incl. `messages[]` |
-| PATCH | `/api/conversations/{id}` | `{title?, pinned?, folder?, language?, model?}` |
-| DELETE | `/api/conversations/{id}` | Cascade-deletes messages → 204 |
-| GET | `/api/memory?query=&kind=&limit=` | Search long-term memory |
-| POST | `/api/memory` | `{content, kind: note\|preference\|project\|task}` → 201 |
-| DELETE | `/api/memory/{id}` | Forget → 204 |
-| POST | `/api/uploads` | multipart `files` (≤5/batch, ≤15 MB each) → **201** `[{id, name, kind, mime, size, extracted_chars, created_at}]`. Text-bearing kinds (pdf/docx/xlsx/csv/pptx/txt/code) are extracted eagerly and cached; images are stored for vision routing. |
-| GET | `/api/uploads/{id}` | Upload metadata → 404 when unknown |
-| POST | `/api/knowledge/documents` | `{title, text}` *or* `{title, uploaded_file_id}` → 201 `{id, title, chunk_count, …}` — chunked (900 chars, 150 overlap) + mirrored into FTS5 |
-| GET | `/api/knowledge/documents` | List knowledge documents |
-| DELETE | `/api/knowledge/documents/{id}` | Removes doc + chunks + FTS rows → 204 |
-| GET | `/api/knowledge/search?q=` | `{query, hits:[{document, chunk_id, snippet («term» marks), score}]}` — FTS5 OR + bm25; LIKE fallback when FTS5 unavailable |
+| GET | `/api/providers/catalog` | Small static setup metadata for Gemini and Groq; contains no model catalog or credentials. |
+| GET | `/api/providers` | Configured-provider status, non-reversible key hint, and priority; never returns saved keys. |
+| PUT | `/api/providers/{provider}/key` | Encrypt and save a key or change a selected text model. Response includes status/hint only. |
+| DELETE | `/api/providers/{provider}/key` | Remove saved key and model checks. |
+| POST | `/api/providers/{provider}/verify` | Validate the key and selected text model with a real provider request. |
+| GET | `/api/providers/{provider}/models?task=text&force=false` | Fetch live provider models and return only models validated for `task`. |
+| POST | `/api/providers/{provider}/models/validate` | Validate `{ "model_id": "…", "task": "vision" }`. |
+| POST | `/api/providers/{provider}/toggle` | Enable/disable a provider after successful verification. |
+| PUT | `/api/providers/priority` | Save `{ "order": ["gemini", "groq"] }`. |
 
-Errors: JSON `{detail}` · 400/404/422 · 429 when the per-IP bucket (120/min) trips.
+Supported task values are `text`, `vision`, `audio_input`, `audio_output`, `image_generation`, `video`, and `tools`. Capabilities are never inferred from model names. Tasks that do not have an implemented, successful provider probe are returned as unavailable. Model validation is cached server-side for a limited period and can be force-refreshed.
 
-## WebSocket — `/ws/chat`
+Gemini discovery uses Google's official paginated `models.list` endpoint and its supported-generation-method metadata. Generation is sent through Gemini's OpenAI-compatible chat endpoint. Groq discovery uses its official `/openai/v1/models` endpoint; chat usability is checked through chat completions. Candidate catalog entries are not marked usable until an operation succeeds.
 
-### Client → Server
-```jsonc
-{"type":"user_message","content":"…","conversation_id":null,"model":null,"language":null,
- "temperature":0.7,"attachments":["<upload id>", "…"],"internet":true,"multi_agent":true}
-// conversation_id omitted → a new "New chat" is created and announced
-// model/language/temperature override the conversation's settings for this message (language persists)
-// attachments: ids from POST /api/uploads (≤5). Unknown id → attachment_not_found error, nothing sent.
-// Known file kinds inject extracted text into the turn; images route to a vision model automatically
-// (notice "🖼 Routed images to …" when auto-switched, clear guidance when no vision model is local).
-// internet: runs the LangGraph research agent (plan→search→fetch) over SearXNG and cites the
-// results into the streamed answer; orb shows SEARCHING; failures degrade to honest guidance.
-// multi_agent (Phase 6): upgrades to the deep graph — planner decomposes into sub-questions,
-// researcher searches+reads, critic checks coverage and loops refine→search until covered or
-// VEDNIX_AGENTS_MAX_ITERATIONS (default 2) — implies web research even when internet=false.
-// Note: deterministic plugins (time/system/memory) answer before the research/web path — by design.
-{"type":"cancel"}    // stop current generation; partial text persists with *(stopped)*
-{"type":"ping"}      // → pong
+## Core REST routes
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/health` | Service and provider-neutral chat readiness. |
+| GET | `/api/models?provider=gemini&task=text` | Compatible, validated models for the current provider/task. |
+| GET/POST | `/api/conversations` | List or create conversations. |
+| GET/PATCH/DELETE | `/api/conversations/{id}` | Read, update, or remove a conversation. |
+| POST | `/api/uploads` | Upload files for chat (bounded size/count). |
+| GET | `/api/uploads/{id}` | Read upload metadata. |
+| GET | `/api/uploads/{id}/text` | Read extracted text for a stored upload. |
+| GET/POST/DELETE | `/api/memory` | List, save, and remove memory items. |
+| GET/POST/DELETE | `/api/knowledge/documents` | List, add, and remove indexed documents. |
+| GET | `/api/knowledge/search?q=…` | Search indexed knowledge. |
+| GET | `/api/system/status` | Backend system and usage status. |
+| GET | `/api/onboarding/status` | Read setup state. |
+| POST | `/api/onboarding/mode` | Save the supported provider-backed workspace mode. |
+| POST | `/api/onboarding/complete` | Mark first-run setup complete. |
+| POST | `/api/onboarding/wipe-data` | Remove user conversation and memory data. |
+
+Authentication routes are under `/api/auth`; owner administration is under `/api/admin`.
+
+## WebSocket chat — `/ws/chat`
+
+### Client frame
+
+```json
+{
+  "type": "user_message",
+  "content": "Explain this image",
+  "conversation_id": null,
+  "provider": "gemini",
+  "model": null,
+  "language": "auto",
+  "temperature": 0.7,
+  "attachments": ["upload-id"],
+  "internet": false,
+  "multi_agent": false
+}
 ```
 
-### Server → Client
-```jsonc
-{"type":"conversation_created","conversation_id":"…","title":"New chat"}
-{"type":"state_changed","state":"THINKING"}     // IDLE|LISTENING|THINKING|SPEAKING|EXECUTING|SEARCHING|LEARNING|UPDATING — drive the orb
-{"type":"message_started","message_id":"…","conversation_id":"…"}
-{"type":"agent_step","step":"plan|search|fetch|critique|refine|build","detail":"…"} // Phase 6 loop, streamed live
-{"type":"token","message_id":"…","content":"…"} // raw LLM/plugin chunks, concatenate
-{"type":"message_done","message_id":"…","conversation_id":"…","plugins":["time"],"kb_sources":["Launch Plan"],
- "sources":[{"title":"Vednix Docs","url":"https://…"}],
- "steps":[{"step":"plan","detail":"planner decomposing the question"}],"cancelled":false}
-// sources: web citations from an internet turn (empty otherwise)
-// steps: the agent trace of a research turn (Phase 6), same order as streamed agent_step frames
-{"type":"title_updated","conversation_id":"…","title":"…"}  // after first exchange
-{"type":"error","code":"busy|rate_limited|too_long|invalid|bad_payload|nothing_to_cancel|attachment_not_found","message":"…"}
-{"type":"pong"}
-```
+`provider: null` requests automatic priority routing. An explicit provider/model is strict. The existing WebSocket is the sole chat transport; chat messages and attachments remain attached to the selected conversation. Other client frames are `{"type":"cancel"}` and `{"type":"ping"}`.
 
-### Example (Python)
-```python
-import asyncio, json, websockets
+The server sends `state_changed`, `message_started`, `token`, `agent_step`, `message_done`, `conversation_created`, `title_updated`, `error`, or `pong` frames. Pre-token provider errors may trigger a compatible-provider handoff; after the first token, the response is not silently switched to another provider.
 
-async def chat(text):
-    async with websockets.connect("ws://localhost:8000/ws/chat") as ws:
-        await ws.send(json.dumps({"type": "user_message", "content": text}))
-        async for raw in ws:
-            f = json.loads(raw)
-            if f["type"] == "token":
-                print(f["content"], end="", flush=True)
-            if f["type"] == "message_done":
-                break
+## CORS and errors
 
-asyncio.run(chat("नमस्ते! मेरे CPU का हाल बताओ"))   # answers in Hindi, via plugins
-```
+CORS is credentialed and allowlisted for exact origins: `https://vednix.vercel.app` and configured localhost development origins. Wildcards and URL paths are rejected. The WebSocket checks the same origin list.
 
-## Validation & limits
-
-- `content` must be non-empty, ≤ `VEDNIX_MAX_MESSAGE_CHARS` (default 32 000)
-- One active generation per connection (`busy` otherwise); ~8 messages / 20 s per connection
-- All REST bodies validated by Pydantic schemas (`api/schemas.py`)
-
-## Providers (Phase 5)
-
-`VEDNIX_LLM_PROVIDER=ollama` (default, fully offline) or `openrouter`. Both
-providers implement the original dev_ai client interface (`chat`/`chat_stream`/
-`is_available`/`list_models`), so everything upstream — engine, vision routing,
-model selector — is provider-agnostic. OpenRouter needs
-`VEDNIX_OPENROUTER_API_KEY`; `/api/health` reports the active `provider` and the
-UI footer labels it.
-
-## Internet research (Phase 5)
-
-`VEDNIX_SEARXNG_URL` points at a SearXNG instance (empty string disables the
-feature server-side). Searches run through the LangGraph state machine
-(`agents/research/service.py`): plan → parallel search → page fetch → context
-build. The final answer is still the single engine streaming pipeline (audit
-B3) with citations `[1]…` and a `sources` list on `message_done`.
-
-## Auth (Phase 5)
-
-`VEDNIX_AUTH_TOKEN` set → every `/api/*` and `/ws/chat` requires
-`Authorization: Bearer <token>` (WS accepts `?token=` too; `/api/health` stays
-open). Empty token = open single-user local mode. `VEDNIX_REDIS_URL` moves
-rate-limit state to Redis (falls back to in-process with a warning).
-
-## Accounts (Phase 7)
-
-Session middleware locks every API+WS once ≥1 user exists (before that the
-machine is open — Vednix's original single-user default). Open paths: health,
-auth login/register/refresh/logout, onboarding status. Access JWT (HS256,
-20 min, jti) travels in the `Authorization` header only; the refresh token is
-an httpOnly cookie **path-scoped to /api/auth** (12 h, or 30 d with
-remember-me) with rotation + reuse-death. Cookie routes enforce the CSRF
-double-submit pair (`vednix_csrf` cookie + `X-CSRF-Token` header); no cookies
-at all ⇒ 401 on the lock, cookie-auth without the pair ⇒ 403.
-Auth bucket: 10/min/IP, 5 failures → 5 min lockout.
-
-```
-POST   /api/auth/register        {username|email(+display_name),password,remember} → tokens
-POST   /api/auth/login           username OR email in one field · remember → rt cookie
-POST   /api/auth/refresh         rt cookie + CSRF → rotated tokens (reuse ⇒ revoke family)
-POST   /api/auth/logout          revokes this device, clears both cookies
-GET    /api/auth/me              current user · PATCH /api/auth/me {display_name,theme,language}
-POST   /api/auth/me/password     {current_password,new_password} ⇒ revokes ALL sessions
-GET    /api/auth/sessions        devices · DELETE /api/auth/sessions/{id} revoke one
-```
-
-## AI providers (Phase 7)
-
-Priority failover across Ollama + configured clouds: the next provider answers
-before the first token with a visible handoff line; mid-stream failures never
-replay (honest). Keys are Fernet-encrypted on disk (machine-bound secret at
-data/secret.key, 0600); API never returns more than the last 4 chars.
-
-```
-GET    /api/providers/catalog                    10 providers: labels, key/docs urls, models
-GET    /api/providers                            configured rows + priority order
-PUT    /api/providers/{id}/key                   save (verify optional) · DELETE …/key remove
-POST   /api/providers/{id}/verify                live connection test → connected|failed
-POST   /api/providers/{id}/toggle                enable/disable · PUT /api/providers/priority
-GET    /api/providers/ollama/status              running + installed models + detail
-GET|PUT /api/providers/ollama/default-model      engine-wide default, hot-applied
-```
-
-## Onboarding & system (Phase 7)
-
-(superseded by Phase 8 below — guest/demo modes, `/onboarding/demo` and
-`demo_active` are gone; `guest/clear` is now `/api/onboarding/wipe-data`;
-`/api/system/status` is unchanged.)
-
-Machine-local password recovery (no SMTP by design): `python scripts/reset_password.py`
-on the machine — prompts for the account, revokes every session, sets a new one.
-
-## Phase 8 — NO SIGNUP NO ENTRY, admin console & the Vednix Engine brand
-
-Guest/demo are dead. `POST /api/onboarding/mode` now accepts only
-`free | cloud` (anything else ⇒ 422); `/api/onboarding/demo` is removed;
-`demo_active` no longer exists in `/api/onboarding/status` (its
-`active_provider` fallback label is **"Vednix Engine"** — the Ollama runtime
-is branded, not advertised). The demo WS gate in `/ws/chat` is gone.
-`POST /api/onboarding/guest/clear` → **`POST /api/onboarding/wipe-data`**
-(erases this install's conversations + memories; never touches accounts).
-
-```python
-VALID_MODES = {"free", "cloud"}        # services/onboarding.py
-ENGINE_LABEL = "Vednix Engine"         # services/providers.py — registry label,
-                                       # handoff line, unreachable-error copy
-```
-
-Priority failover handoff now reads `⚡ Vednix Engine unreachable — answered
-by <cloud> instead.` and the engine-down guidance says
-`Start the Vednix Engine (ollama serve)`. Commands stay real (`ollama pull`…)
-— only the UI-visible brand changed.
-
-### Owner admin console
-
-First account = owner; more owners can exist but the **last owner is
-immortal** (cannot be deleted or demoted out of existence — service raises
-`PermissionError`, API maps it to 400). Every route requires an access JWT
-whose claim `role == "owner"`; members get 403, anonymous 401. An owner
-cannot delete their own account here (400) — use profile. Owner actions
-touch every session via token-family revocation, so a reset/removed user is
-signed out everywhere instantly.
-
-```
-GET    /api/admin/users                        rows: id, username, display_name,
-                                               role, created, live_sessions
-POST   /api/admin/users/{id}/password          {password} — force-reset, revokes all sessions
-POST   /api/admin/users/{id}/revoke-sessions   sign the user out of every device
-DELETE /api/admin/users/{id}                   remove member (self/last-owner ⇒ 400)
-```
-
-Machine-local password recovery (`scripts/reset_password.py`) is unchanged —
-it runs on the box, no SMTP needed by design.
+Provider errors are sanitized for the UI. Authentication, quota/rate-limit, unsupported capability, and temporary outage conditions are classified separately. API keys are redacted from error details and are never returned in responses.

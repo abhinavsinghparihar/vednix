@@ -76,7 +76,6 @@ export interface HealthInfo {
   status: string;
   provider?: string;
   active_provider?: string | null;
-  ollama_available: boolean;
   default_model: string;
   backend_online?: boolean;
   chat_available?: boolean;
@@ -85,23 +84,51 @@ export interface HealthInfo {
   model_available?: boolean;
 }
 
+export interface ModelInfo {
+  id: string;
+  provider: string;
+  displayName: string;
+  capabilities: {
+    text: boolean;
+    vision: boolean;
+    audioInput: boolean;
+    audioOutput: boolean;
+    imageGeneration: boolean;
+    video: boolean;
+    tools: boolean;
+  };
+  contextWindow: number | null;
+  maxOutputTokens: number | null;
+  available: boolean;
+  reason: string | null;
+  latencyMs: number | null;
+  checkedCapabilities: string[];
+}
+
 export interface ModelCatalog {
   provider?: string | null;
+  task?: string;
   default: string;
+  models: ModelInfo[];
   available: string[];
+  rejected?: { id: string; displayName?: string; reason: string }[];
   configured?: boolean;
   verified?: boolean;
   enabled?: boolean;
   model_available?: boolean;
   chat_available?: boolean;
+  verified_only?: boolean;
   error?: string | null;
 }
 
 export const api = {
   health: () => request<HealthInfo>("/api/health"),
-  models: (provider?: string | null) => request<ModelCatalog>(
-    `/api/models${provider ? `?provider=${encodeURIComponent(provider)}` : ""}`,
-  ),
+  models: (provider?: string | null, task = "text", force = false) => {
+    const params = new URLSearchParams({ task });
+    if (provider) params.set("provider", provider);
+    if (force) params.set("force", "true");
+    return request<ModelCatalog>(`/api/models?${params.toString()}`);
+  },
 
   listConversations: () => request<ConversationSummary[]>("/api/conversations"),
   getConversation: (id: string) => request<ConversationDetail>(`/api/conversations/${id}`),

@@ -1,28 +1,32 @@
-"""Liveness/readiness and operation-safe model discovery."""
+"""Liveness/readiness and capability-validated model discovery."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ai_engine.engine import EngineCore
-from ai_engine.ollama_client import OllamaError
-from api.deps import get_core
+from ai_engine.provider_error import ProviderError
+from api.deps import get_core, get_providers
 from api.schemas import HealthOut
+from services.providers import REGISTRY, ProviderService
 
 router = APIRouter(tags=["system"])
 
 
 @router.get("/health", response_model=HealthOut)
-async def health(core: EngineCore = Depends(get_core)) -> HealthOut:
-    """Backend liveness is separate from local Ollama and chat readiness."""
+async def health(
+    core: EngineCore = Depends(get_core),
+    providers: ProviderService = Depends(get_providers),
+) -> HealthOut:
+    """Cheap readiness based on persisted verification; no model fan-out probes."""
     if hasattr(core.llm, "status_snapshot"):
         state = await core.llm.status_snapshot()
-        ollama = state.get("ollama", {})
+        active_id = state.get("active_provider")
+        active = REGISTRY.get(active_id)
         return HealthOut(
             status="ok",
-            provider=getattr(core.llm, "active_label", state.get("active_provider", "unavailable")),
-            ollama_available=bool(ollama.get("running", False)),
-            default_model=str(state.get("active_model") or core.llm.model),
+            provider=active.label if active else "unavailable",
+            default_model=str(state.get("active_model") or ""),
             assistant=core.settings.assistant_name,
             creator=core.settings.creator_name,
             backend_online=True,
@@ -30,47 +34,83 @@ async def health(core: EngineCore = Depends(get_core)) -> HealthOut:
             provider_configured=bool(state.get("provider_configured", False)),
             provider_verified=bool(state.get("provider_verified", False)),
             model_available=bool(state.get("model_available", False)),
-            active_provider=state.get("active_provider"),
+            active_provider=active_id,
         )
-
-    # Lightweight compatibility for injected test/stub clients implementing
-    # the original LLM protocol rather than the production provider router.
     try:
-        ollama_available = await core.llm.is_available()
+        available = await core.llm.is_available()
     except Exception:
-        ollama_available = False
-    try:
-        available = await core.llm.list_models_cached()
-    except Exception:
-        available = []
-    model_available = core.llm.model in available
+        available = False
     return HealthOut(
-        status="ok", provider=getattr(core.llm, "active_label", core.settings.llm_provider),
-        ollama_available=ollama_available, default_model=core.llm.model,
+        status="ok", provider=getattr(core.llm, "active_label", "unavailable"),
+        default_model=str(getattr(core.llm, "model", "")),
         assistant=core.settings.assistant_name, creator=core.settings.creator_name,
-        backend_online=True, chat_available=bool(ollama_available and model_available),
-        provider_configured=True, provider_verified=ollama_available,
-        model_available=model_available, active_provider=None,
+        backend_online=True, chat_available=available, provider_configured=available,
+        provider_verified=available, model_available=available,
+        active_provider=None,
     )
 
 
 @router.get("/models")
-async def models(provider: str | None = Query(default=None), core: EngineCore = Depends(get_core)) -> dict:
-    """List models available for the requested provider's text-chat operation."""
-    if hasattr(core.llm, "model_catalog"):
-        return await core.llm.model_catalog(provider)
-    try:
-        available = await core.llm.list_models(provider=provider) if provider else await core.llm.list_models()
-        default = core.llm.model if core.llm.model in available else (available[0] if available else core.llm.model)
-        return {
-            "provider": provider, "default": default, "available": available,
-            "configured": True, "verified": await core.llm.is_available(),
-            "model_available": default in available,
-            "chat_available": await core.llm.is_available(), "error": None,
-        }
-    except (OllamaError, TypeError) as exc:
-        return {
-            "provider": provider, "default": core.llm.model, "available": [],
-            "configured": False, "verified": False, "model_available": False,
-            "chat_available": False, "error": str(exc),
-        }
+async def models(
+    provider: str | None = Query(default=None),
+    task: str = Query(default="text"),
+    force: bool = Query(default=False),
+    core: EngineCore = Depends(get_core),
+    providers: ProviderService = Depends(get_providers),
+) -> dict:
+    """List only live-discovered models that passed the requested task probe."""
+    if provider:
+        targets = [provider]
+    else:
+        configured = await providers.list_configured()
+        enabled = {row["provider"] for row in configured if row["enabled"] and row["verified"]}
+        targets = [item for item in await providers.get_priority() if item in enabled]
+
+    failures: list[str] = []
+    for target in targets:
+        try:
+            result = await providers.model_catalog(
+                target, settings=core.settings, task=task, force=force,
+            )
+        except ProviderError as exc:
+            failures.append(exc.message)
+            if provider:
+                raise HTTPException(status_code=exc.http_status or 502, detail=exc.message) from exc
+            continue
+        except ValueError as exc:
+            failures.append(str(exc))
+            if provider:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            continue
+        row = await providers._row(target)
+        preferred = row.model_override if row else None
+        default = preferred if preferred in result["available"] else (
+            result["available"][0] if result["available"] else ""
+        )
+        result.update({
+            "default": default,
+            "configured": True,
+            "verified": bool(row and row.verified_at and row.status == "connected"),
+            "enabled": bool(row and row.enabled),
+            "model_available": bool(default),
+            "chat_available": bool(default and row and row.enabled and row.status == "connected"),
+            "error": None if result["available"] else f"No validated {task.replace('_', ' ')} models are available from {REGISTRY[target].label}.",
+        })
+        if provider or result["available"]:
+            return result
+
+    return {
+        "provider": provider,
+        "task": task,
+        "models": [],
+        "available": [],
+        "default": "",
+        "vision_available": [],
+        "configured": bool(targets),
+        "verified": False,
+        "enabled": False,
+        "model_available": False,
+        "chat_available": False,
+        "verified_only": True,
+        "error": failures[-1] if failures else "No verified provider has a model available for this task.",
+    }
