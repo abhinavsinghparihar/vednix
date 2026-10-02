@@ -91,7 +91,7 @@ export function Hero() {
 
           <Reveal delay={0.12}>
             <h1 className="mt-7 font-display text-[clamp(2.9rem,7.2vw,6.2rem)] font-extrabold uppercase leading-[0.94] tracking-[-0.02em] text-cream">
-              Your machine.
+              Your workspace.
               <br />
               <span className="inline-flex items-center gap-[0.14em]">
                 Your
@@ -110,9 +110,9 @@ export function Hero() {
 
           <Reveal delay={0.24}>
             <p className="mt-7 max-w-md text-[15px] leading-relaxed text-muted">
-              Vednix AI is a cinematic chat and research workspace that runs entirely on your
-              hardware — streaming answers, deep research agents, voice and memory, in Hindi,
-              Hinglish, English and beyond. No cloud required. Nothing leaves the room.
+              Vednix AI is a cinematic chat and research workspace for Hindi, Hinglish,
+              English and beyond. Connect Google Gemini or Groq with your own key, stream
+              replies, and keep your conversations and workspace tools together.
             </p>
           </Reveal>
 

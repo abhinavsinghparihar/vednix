@@ -103,8 +103,8 @@ export function Composer() {
   const over = value.length > MAX_CHARS * 0.95;
 
   return (
-    <div className="px-4 pb-5 pt-1 md:px-8">
-      <div className="mx-auto max-w-3xl">
+    <div className="w-full px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1 md:px-8 md:pb-5">
+      <div className="mx-auto w-full max-w-3xl">
         {draftAttachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-2">
             {draftAttachments.map((att) => (
@@ -114,7 +114,7 @@ export function Composer() {
         )}
         <div
           className={cn(
-            "glass-liquid flex items-end gap-2 rounded-[26px] p-3 transition-shadow duration-300",
+            "glass-liquid flex min-w-0 items-end gap-1.5 rounded-[26px] p-2.5 transition-shadow duration-300 sm:gap-2 sm:p-3",
             "focus-within:border-[rgba(227,184,87,0.45)] focus-within:shadow-glow-gold",
             generating && "border-[rgba(227,184,87,0.3)]",
           )}
@@ -163,7 +163,7 @@ export function Composer() {
                 ? "Message Vednix… (किसी भी भाषा में लिखिए)"
                 : "Waiting for backend…"
             }
-            className="no-scrollbar max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-relaxed text-cream placeholder:text-faint focus:outline-none"
+            className="no-scrollbar min-w-0 max-h-[200px] min-h-[40px] flex-1 resize-none bg-transparent px-1 py-2 text-[15px] leading-relaxed text-cream placeholder:text-faint focus:outline-none"
             aria-label="Message Vednix AI"
           />
 
@@ -226,7 +226,7 @@ export function Composer() {
 
         <p className="mt-2 flex items-center justify-center gap-2 text-center text-[10px] tracking-wide text-faint">
           <span className={cn("h-1 w-1 rounded-full", coreState === "IDLE" ? "bg-faint" : "bg-gold animate-pulse-soft")} />
-          Vednix runs on your machine · replies mirror your language · verify important info
+          Replies use your selected provider · verify important information
         </p>
       </div>
     </div>

@@ -1,9 +1,10 @@
 """Auth routes — register, login, refresh (rotating), logout, profile,
 devices, password change. Cookie contract:
 
-  vednix_rt    httpOnly · SameSite=Lax · Path=/api/auth   (refresh credential)
-  vednix_csrf  readable by the SPA · mirrored back as X-CSRF-Token on
-               cookie-bearing calls (double-submit CSRF defense)
+  vednix_rt    httpOnly · Lax locally / None+Secure over HTTPS · Path=/api/auth
+               (refresh credential)
+  vednix_csrf  readable locally; cross-origin SPAs bootstrap it from /csrf
+               and mirror it in X-CSRF-Token (double-submit CSRF defense)
 
 Access tokens never touch cookies or storage: they live in SPA memory and
 ride the Authorization header — XSS-persistent-token and CSRF classes are
@@ -36,6 +37,25 @@ router = APIRouter(tags=["auth"])
 RT_COOKIE = "vednix_rt"
 
 
+@router.get("/csrf")
+async def csrf_bootstrap(request: Request, response: Response) -> dict:
+    """Expose the non-authenticating CSRF nonce to the configured SPA origin.
+
+    Third-party frontends (Vercel → Render) cannot read a cookie scoped to the
+    API host, so the SPA bootstraps this nonce via credentialed CORS and keeps
+    it in memory. The refresh token itself remains httpOnly and is never read.
+    """
+    token = request.cookies.get(CSRF_COOKIE, "")
+    if not token or len(token) > 128:
+        token = new_csrf_token()
+        secure, same_site = _cookie_policy(request)
+        response.set_cookie(
+            CSRF_COOKIE, token, max_age=30 * 24 * 3600, httponly=False,
+            secure=secure, samesite=same_site, path="/",
+        )
+    return {"csrf_token": token}
+
+
 def _user_out(u) -> UserOut:
     return UserOut(
         id=u.id, username=u.username, display_name=u.display_name, email=u.email,
@@ -56,21 +76,35 @@ async def _throttle(request: Request, bucket: str) -> None:
         raise HTTPException(status_code=429, detail="Slow down — too many attempts.")
 
 
-def _set_session_cookies(response: Response, tokens: IssuedTokens, *, remember: bool) -> None:
+def _cookie_policy(request: Request) -> tuple[bool, str]:
+    """Use cross-site cookie attributes for HTTPS deployments, retain local Lax."""
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
+    origin = request.headers.get("origin", "").lower()
+    secure = request.url.scheme == "https" or forwarded_proto == "https" or origin.startswith("https://")
+    return secure, "none" if secure else "lax"
+
+
+def _set_session_cookies(
+    response: Response, tokens: IssuedTokens, *, remember: bool, request: Request,
+) -> str:
     max_age = (30 * 24 * 3600) if remember else (12 * 3600)
+    secure, same_site = _cookie_policy(request)
+    csrf_token = new_csrf_token()
     response.set_cookie(
         RT_COOKIE, tokens.refresh_token, max_age=max_age, httponly=True,
-        samesite="lax", path="/api/auth",
+        secure=secure, samesite=same_site, path="/api/auth",
     )
     response.set_cookie(
-        CSRF_COOKIE, new_csrf_token(), max_age=max_age, httponly=False,
-        samesite="lax", path="/",
+        CSRF_COOKIE, csrf_token, max_age=max_age, httponly=False,
+        secure=secure, samesite=same_site, path="/",
     )
+    return csrf_token
 
 
-def _clear_session_cookies(response: Response) -> None:
-    response.delete_cookie(RT_COOKIE, path="/api/auth")
-    response.delete_cookie(CSRF_COOKIE, path="/")
+def _clear_session_cookies(response: Response, request: Request) -> None:
+    secure, same_site = _cookie_policy(request)
+    response.delete_cookie(RT_COOKIE, path="/api/auth", secure=secure, samesite=same_site)
+    response.delete_cookie(CSRF_COOKIE, path="/", secure=secure, samesite=same_site)
 
 
 def _rt_cookie(request: Request) -> str:
@@ -80,10 +114,11 @@ def _rt_cookie(request: Request) -> str:
     return token
 
 
-def _token_payload(user, tokens: IssuedTokens) -> dict:
+def _token_payload(user, tokens: IssuedTokens, csrf_token: str) -> dict:
     return {
         "access_token": tokens.access_token,
         "expires_in": tokens.access_expires_in,
+        "csrf_token": csrf_token,
         "user": _user_out(user).model_dump(mode="json"),
     }
 
@@ -103,9 +138,9 @@ async def register(body: RegisterIn, request: Request, response: Response,
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # register logs you straight in — one less hop on a local app
     tokens = await users.issue_session_for(user, remember=True, device_label="This device")
-    _set_session_cookies(response, tokens, remember=True)
+    csrf_token = _set_session_cookies(response, tokens, remember=True, request=request)
     logger.info("session opened after register (user=%s)", user.username)
-    return _token_payload(user, tokens)
+    return _token_payload(user, tokens, csrf_token)
 
 
 @router.post("/login")
@@ -119,8 +154,8 @@ async def login(body: LoginIn, request: Request, response: Response,
         )
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    _set_session_cookies(response, tokens, remember=body.remember)
-    return _token_payload(user, tokens)
+    csrf_token = _set_session_cookies(response, tokens, remember=body.remember, request=request)
+    return _token_payload(user, tokens, csrf_token)
 
 
 @router.post("/email/request")
@@ -142,8 +177,8 @@ async def verify_email_otp(body: EmailOTPVerifyIn, request: Request, response: R
         tokens = await users.issue_session_for(user, remember=body.remember, device_label=_ua_label(request))
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    _set_session_cookies(response, tokens, remember=body.remember)
-    return _token_payload(user, tokens)
+    csrf_token = _set_session_cookies(response, tokens, remember=body.remember, request=request)
+    return _token_payload(user, tokens, csrf_token)
 
 
 def _ua_label(request: Request) -> str:
@@ -168,14 +203,14 @@ async def refresh(request: Request, response: Response,
     try:
         tokens = await users.refresh(refresh_token=rt, device_label=_ua_label(request))
     except AuthError as exc:
-        _clear_session_cookies(response)
+        _clear_session_cookies(response, request)
         raise HTTPException(status_code=401, detail=str(exc)) from exc
     user = await users.get_user_by_session(tokens.session_id)
     if user is None:
-        _clear_session_cookies(response)
+        _clear_session_cookies(response, request)
         raise HTTPException(status_code=401, detail="Account not found.")
-    _set_session_cookies(response, tokens, remember=True)  # sliding renewal
-    return _token_payload(user, tokens)
+    csrf_token = _set_session_cookies(response, tokens, remember=True, request=request)  # sliding renewal
+    return _token_payload(user, tokens, csrf_token)
 
 
 @router.post("/logout")
@@ -185,7 +220,7 @@ async def logout(request: Request, response: Response,
     rt = request.cookies.get(RT_COOKIE, "")
     if rt:
         await users.logout(refresh_token=rt)
-    _clear_session_cookies(response)
+    _clear_session_cookies(response, request)
     return {"ok": True}
 
 
@@ -220,7 +255,7 @@ async def change_password(body: ChangePasswordIn, request: Request, response: Re
     except AuthError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # every device was revoked — drop this browser's cookies too
-    _clear_session_cookies(response)
+    _clear_session_cookies(response, request)
 
 
 @router.get("/sessions", response_model=list[SessionOut])

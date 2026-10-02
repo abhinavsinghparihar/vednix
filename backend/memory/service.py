@@ -103,7 +103,7 @@ class MemoryService:
             return msg
 
     async def recent_history(self, conversation_id: str, *, max_turns: int) -> list[dict]:
-        """Last N messages as Ollama-format dicts (chronological)."""
+        """Last N messages as provider-neutral chat dictionaries (chronological)."""
         async with self._sessions() as session:
             stmt = (
                 select(Message)

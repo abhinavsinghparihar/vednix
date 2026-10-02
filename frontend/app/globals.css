@@ -27,16 +27,12 @@
 
   --color-danger: #f0564f;
 
-  /* typography — concrete family names, NOT var(--font-*) indirection:
-     @theme lands these tokens on :root, but next/font's variable classes
-     define --font-inter etc. on <body>; var() in a custom property
-     substitutes where the property is defined (:root) → undefined there →
-     guaranteed-invalid → the whole chain silently fell back to UA serif.
-     next/font registers the @font-face family names app-wide regardless,
-     so naming them directly is both correct and simpler. */
-  --font-sans: "Inter", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Outfit", "Inter", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Typography uses concrete @fontsource family names, not var(--font-*)
+     indirection. Fontsource registers these @font-face declarations app-wide,
+     so the tokens can use the family names directly. */
+  --font-sans: "Inter Variable", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit Variable", "Inter Variable", "Noto Sans Devanagari", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* motion */
   --animate-float: float 7s ease-in-out infinite;

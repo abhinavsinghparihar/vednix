@@ -1,11 +1,9 @@
-"""Phase 5 tests — OpenRouter provider, web research agent (LangGraph),
-Redis limiter, auth middleware. Every network boundary is a MockTransport;
-nothing here touches the real internet or a real Redis.
+"""Research agent, rate limiting, and auth middleware regressions.
+External services use MockTransport or a local stub; no live credentials are used.
 """
 
 from __future__ import annotations
 
-import json
 
 import httpx
 import pytest
@@ -14,88 +12,10 @@ from fastapi.testclient import TestClient
 from agents.research import ResearchService, ResearchUnavailable
 from agents.research.fetcher import html_to_text
 from agents.research.searx import query_searxng
-from ai_engine.ollama_client import OllamaError
-from ai_engine.openrouter_client import OpenRouterClient
-from config import Settings
 from core.rate_limit import RedisRateLimiter, RateLimiter, build_rate_limiter
 from main import create_app
 from tests.conftest import FakeLLM
 
-
-
-# --- OpenRouterClient -------------------------------------------------------
-
-def _sse(lines: list[str]) -> bytes:
-    return "".join(f"data: {line}\n\n" for line in lines).encode()
-
-
-def openrouter_client(handler, *, api_key: str = "sk-test") -> OpenRouterClient:
-    transport = httpx.MockTransport(handler)
-    client = httpx.AsyncClient(transport=transport, base_url="https://openrouter.ai/api/v1")
-    return OpenRouterClient(api_key, "or-model", client=client, health_ttl=0.0)
-
-
-async def test_openrouter_chat_roundtrip():
-    def handler(request: httpx.Request) -> httpx.Response:
-        payload = json.loads(request.content)
-        assert payload["model"] == "or-model" and payload["stream"] is False
-        return httpx.Response(200, json={"choices": [{"message": {"content": "hello cloud"}}]})
-
-    orc = openrouter_client(handler)
-    assert await orc.chat([{"role": "user", "content": "hi"}], 0.5) == "hello cloud"
-
-
-async def test_openrouter_stream_yields_deltas_and_stops_at_done():
-    def handler(request: httpx.Request) -> httpx.Response:
-        chunks = [
-            json.dumps({"choices": [{"delta": {"content": "Hello "}}]}),
-            "not-json",  # malformed lines are logged & skipped, not fatal
-            json.dumps({"choices": [{"delta": {"content": "world"}}]}),
-            json.dumps({"choices": [{"delta": {}}]}),  # empty delta ignored
-            "[DONE]",
-            json.dumps({"choices": [{"delta": {"content": "NEVER"}}]}),
-        ]
-        return httpx.Response(200, content=_sse(chunks), headers={"content-type": "text/event-stream"})
-
-    orc = openrouter_client(handler)
-    out = "".join([c async for c in orc.chat_stream([{"role": "user", "content": "hi"}], 0.5)])
-    assert out == "Hello world"
-
-
-async def test_openrouter_http_error_and_error_frame_raise():
-    orc_bad_http = openrouter_client(lambda req: httpx.Response(429, json={"error": "rate limited"}))
-    with pytest.raises(OllamaError, match="429"):
-        await orc_bad_http.chat([{"role": "user", "content": "hi"}], 0.5)
-
-    orc_err_frame = openrouter_client(
-        lambda req: httpx.Response(200, json={"error": {"message": "model down"}})
-    )
-    with pytest.raises(OllamaError, match="OpenRouter error"):
-        await orc_err_frame.chat([{"role": "user", "content": "hi"}], 0.5)
-
-
-async def test_openrouter_missing_key_fails_fast():
-    orc = openrouter_client(lambda req: httpx.Response(200, json={}), api_key="")
-    assert await orc.is_available() is False
-    with pytest.raises(OllamaError, match="key missing"):
-        await orc.list_models()
-
-
-async def test_openrouter_images_use_parts_contract():
-    captured: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured.update(json.loads(request.content))
-        return httpx.Response(200, json={"choices": [{"message": {"content": "an image"}}]})
-
-    orc = openrouter_client(handler)
-    await orc.chat(
-        [{"role": "user", "content": "what is this?"}], 0.5, images=["QUJD"]
-    )
-    parts = captured["messages"][0]["content"]
-    assert parts[0] == {"type": "text", "text": "what is this?"}
-    assert parts[1]["type"] == "image_url"
-    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
 
 
 # --- SearXNG client -----------------------------------------------------------
@@ -241,31 +161,6 @@ def test_auth_gate_when_token_set(settings):
         with pytest.raises(Exception):  # websocket closed 4401 before accept
             with client.websocket_connect("/ws/chat"):
                 pass
-
-
-# --- provider selection via the app ----------------------------------------------
-
-def test_provider_switch_env_key_missing_falls_back_to_ollama(settings):
-    """Phase 7 router: llm_provider=openrouter WITHOUT a key must NOT build a
-    client destined to 401 — the router honestly degrades to Engine-only."""
-    cloud = settings.model_copy(update={"llm_provider": "openrouter", "openrouter_api_key": ""})
-    with TestClient(create_app(settings=cloud)) as client:  # no llm injection → real wiring
-        health = client.get("/api/health").json()
-        assert health["provider"] == "Vednix Engine"
-        assert health["ollama_available"] is False  # no ollama in the test env
-        assert health["default_model"] == cloud.ollama_model
-
-
-def test_provider_switch_env_key_pins_openrouter_first(settings, monkeypatch):
-    """With a real env key, OpenRouter is pinned as candidate #1 and the
-    router's reported model/label reflect it (no network needed)."""
-    cloud = settings.model_copy(
-        update={"llm_provider": "openrouter", "openrouter_api_key": "sk-or-test-key"}
-    )
-    with TestClient(create_app(settings=cloud)) as client:
-        health = client.get("/api/health").json()
-        assert health["provider"] == "openrouter (env)"  # pinned label wins honestly
-        assert health["default_model"] == cloud.openrouter_model
 
 
 # --- internet research through the WS pipeline -------------------------------------

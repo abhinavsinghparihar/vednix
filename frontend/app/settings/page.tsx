@@ -6,11 +6,10 @@
  *   Appearance   — Obsidian/Ivory/System theme
  *   Language     — default reply language (account pref; guests: local)
  *   Voice        — speak replies + speed + test (shared chat store state)
- *   AI Models    — default model per the ACTIVE provider (live-applied)
- *   Engine       — connection, installed models, pull guides, specs
- *   API Keys     — the provider manager: add/verify/toggle/remove/priority
+ *   AI Models    — live-discovered, task-validated provider model choices
+ *   API Keys     — encrypted provider keys, verification, enablement, priority
  *   Memory       — counts, open view, context budget note
- *   Privacy      — local-first explainer + destructive actions
+ *   Privacy      — provider data boundaries + destructive actions
  *   Experimental — internet search + multi-agent feature switches
  *   About        — version, stack, creator signature
  */
@@ -21,13 +20,13 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ArrowDown, ArrowLeft, ArrowUp, Bot, CheckCircle2, ChevronDown, Cloud, Cpu, Database,
-  FlaskConical, Globe, HardDrive, Info, KeyRound, Languages, Loader2, MemoryStick,
+  ArrowDown, ArrowLeft, ArrowUp, Bot, CheckCircle2, Cloud, Cpu, Database,
+  FlaskConical, Globe, Info, KeyRound, Languages, Loader2, MemoryStick,
   Mic, MonitorSmartphone, Palette, RefreshCw, Settings2, ShieldCheck, Sparkles, Trash2, Users, Volume2,
 } from "lucide-react";
 import {
   adminApi, authApi, onboardingApi, providerApi, systemApi,
-  type AdminUser, type OnboardingStatus, type ProviderCatalogItem, type ProviderConfig, type SystemStatus,
+  type AdminUser, type OnboardingStatus, type ProviderCatalogItem, type ProviderConfig, type ProviderModelInfo, type SystemStatus,
 } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
 import { api } from "@/lib/api";
@@ -38,7 +37,7 @@ import { NeuralBackground } from "@/components/background/NeuralBackground";
 import { MouseGlow } from "@/components/background/MouseGlow";
 import { ThemeToggle } from "@/components/brand/ThemeToggle";
 import { Button, Segmented, Slider, Switch } from "@/components/ui/primitives";
-import { CopyChip, StatusDot } from "@/components/onboarding/shared";
+import { StatusDot } from "@/components/onboarding/shared";
 import { applyTheme, currentTheme } from "@/lib/theme";
 import { tts } from "@/lib/tts";
 import { PasswordField } from "@/components/auth/fields";
@@ -53,7 +52,6 @@ const TABS = [
   { id: "language", label: "Language", icon: Languages },
   { id: "voice", label: "Voice", icon: Volume2 },
   { id: "models", label: "AI Models", icon: Bot },
-  { id: "engine", label: "Engine", icon: Cpu },
   { id: "keys", label: "API Keys", icon: KeyRound },
   { id: "memory", label: "Memory", icon: MemoryStick },
   { id: "privacy", label: "Privacy", icon: ShieldCheck },
@@ -179,8 +177,7 @@ export default function SettingsPage() {
               {tab === "appearance" && <AppearancePanel />}
               {tab === "language" && <LanguagePanel />}
               {tab === "voice" && <VoicePanel />}
-              {tab === "models" && <ModelsPanel sys={sys} reload={load} />}
-              {tab === "engine" && <OllamaPanel sys={sys} />}
+              {tab === "models" && <ModelsPanel />}
               {tab === "keys" && <ApiKeysPanel />}
               {tab === "memory" && <MemoryPanel sys={sys} />}
               {tab === "privacy" && <PrivacyPanel reload={load} />}
@@ -209,10 +206,10 @@ function GeneralPanel({ status, sys, reload }: { status: OnboardingStatus | null
             Backend {status ? "live" : "unreachable"}
           </span>
           <span className="flex items-center gap-2 text-muted">
-            <StatusDot tone={status?.ollama_running ? "ok" : "idle"} />
-            Engine {status?.ollama_running ? "running" : "stopped"}
+            <StatusDot tone={status?.chat_available ? "ok" : "idle"} />
+            Chat {status?.chat_available ? "ready" : "not configured"}
           </span>
-          <span className="text-muted">Provider · <b className="text-cream">{status?.active_provider ?? "—"}</b></span>
+          <span className="text-muted">Provider · <b className="text-cream">{status?.active_provider ?? "unavailable"}</b></span>
           <Button
             variant="ghost" size="sm" className="ml-auto"
             disabled={waking}
@@ -227,8 +224,8 @@ function GeneralPanel({ status, sys, reload }: { status: OnboardingStatus | null
       </Card>
       <Card title="Run mode" icon={Sparkles}>
         <p className="mb-3 text-[13px] text-muted">
-          This machine runs in <b className="text-cream">{status?.mode ?? "unset"}</b> mode.
-          Re-run the first-time ceremony anytime:
+          This workspace is configured for <b className="text-cream">{status?.mode ?? "unset"}</b> access.
+          Re-run the setup ceremony anytime:
         </p>
         <div className="flex flex-wrap gap-2">
           <Link href="/onboarding"><Button variant="subtle" size="sm"><Sparkles className="h-3.5 w-3.5" /> Open setup ceremony</Button></Link>
@@ -360,7 +357,7 @@ function VoicePanel() {
             const off = tts.onSpeakingChange((speaking) => {
               if (!speaking) { off(); setTesting(false); }
             });
-            tts.speak("नमस्ते — this is Vednix speaking from your machine. Everything you hear is generated locally.", "hi-IN");
+            tts.speak("नमस्ते — this is Vednix speaking with your browser's selected system voice.", "hi-IN");
             setTimeout(() => { off(); setTesting(false); }, 9000);
           }}
         >
@@ -378,132 +375,141 @@ function VoicePanel() {
   );
 }
 
-function ModelsPanel({ sys, reload }: { sys: SystemStatus | null; reload: () => Promise<void> }) {
+type ModelTask = "text" | "vision" | "audio_input" | "audio_output" | "image_generation" | "video" | "tools";
+
+const TASK_CAPABILITY: Record<ModelTask, keyof ProviderModelInfo["capabilities"]> = {
+  text: "text",
+  vision: "vision",
+  audio_input: "audioInput",
+  audio_output: "audioOutput",
+  image_generation: "imageGeneration",
+  video: "video",
+  tools: "tools",
+};
+
+function ModelsPanel() {
+  const [provider, setProvider] = useState("gemini");
+  const [task, setTask] = useState<ModelTask>("text");
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [models, setModels] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string>("");
+  const [selected, setSelected] = useState("");
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
 
-  useEffect(() => {
-    void api.models().then((r) => {
-      setModels(r.available ?? []);
-      setSelected(r.default ?? "");
-    }).catch(() => setModels([]));
-  }, []);
+  const loadProviders = useCallback(async () => {
+    try {
+      const result = await providerApi.configured();
+      setProviders(result.providers);
+      if (!result.providers.some((row) => row.provider === provider) && result.providers.length) {
+        setProvider(result.providers[0].provider);
+      }
+    } catch { setProviders([]); }
+  }, [provider]);
+
+  const loadModels = useCallback(async (force = false) => {
+    if (!provider) return;
+    setLoading(true);
+    setError(null);
+    setNote(null);
+    try {
+      const result = await api.models(provider, task, force);
+      const ids = result.available ?? [];
+      setModels(ids);
+      const configured = providers.find((row) => row.provider === provider)?.model_override;
+      setSelected(configured && ids.includes(configured) ? configured : ids[0] ?? "");
+      if (!ids.length) setError(result.error || `No validated ${task.replaceAll("_", " ")} models are available.`);
+    } catch (err) {
+      setModels([]);
+      setSelected("");
+      setError(err instanceof Error ? err.message : "Could not load live models.");
+    } finally {
+      setLoading(false);
+    }
+  }, [provider, task, providers]);
+
+  useEffect(() => { void loadProviders(); }, [loadProviders]);
+  useEffect(() => { void loadModels(); }, [loadModels]);
 
   const save = async () => {
     if (!selected) return;
     setSaving(true);
+    setError(null);
     setNote(null);
     try {
-      await systemApi.setDefaultModel(selected);
-      await reload();
-      setNote(`Default model saved — ${selected} answers from now on.`);
+      if (task === "text") {
+        await providerApi.saveKey(provider, { model: selected });
+        const result = await providerApi.verify(provider);
+        if (!result.connected) throw new Error(result.detail || "The selected model did not pass text verification.");
+        setNote(`${provider}: ${selected} is now the verified default text model.`);
+        await loadProviders();
+        await loadModels();
+      } else {
+        const result = await providerApi.validateModel(provider, selected, task);
+        if (!result.available || !result.capabilities[TASK_CAPABILITY[task]]) {
+          throw new Error(result.reason || `The model did not pass the ${task.replaceAll("_", " ")} check.`);
+        }
+        setNote(`${selected} passed the live ${task.replaceAll("_", " ")} capability check.`);
+      }
     } catch (err) {
-      setNote(err instanceof ApiError ? `${err.message} (default model applies to the Engine; cloud models are set per provider in API Keys)` : "Could not save.");
+      setError(err instanceof ApiError ? err.message : err instanceof Error ? err.message : "Could not save model selection.");
     } finally {
       setSaving(false);
     }
   };
 
+  const row = providers.find((item) => item.provider === provider);
+  const tasks: [ModelTask, string][] = [
+    ["text", "Text"], ["vision", "Vision"], ["audio_input", "Audio input"],
+    ["audio_output", "Audio output"], ["image_generation", "Image generation"],
+    ["video", "Video"], ["tools", "Tools"],
+  ];
+
   return (
     <Panel>
-      <Card title="Active provider" icon={Bot}>
-        <p className="text-[13px] text-muted">
-          <b className="text-cream">{sys?.active_provider ?? "—"}</b> is answering right now.
-          The priority chain lives in <b>API Keys</b> — Engine first, cloud as fallback.
+      <Card title="Live model discovery" icon={Bot}>
+        <p className="mb-4 text-[12px] leading-relaxed text-muted">
+          Models come from the selected provider's official live API. A model appears in this list only after it passes a real check for the chosen task. Chat automatically switches between text and vision filtering when an image is attached.
         </p>
-      </Card>
-      <Card title="Default model" icon={Cpu}>
-        {models.length === 0 ? (
-          <p className="text-[12px] text-faint">No models listed — start the Engine or verify a cloud key, then re-check.</p>
-        ) : (
-          <>
-            <div className="relative">
-              <select
-                value={selected}
-                onChange={(e) => setSelected(e.target.value)}
-                aria-label="Default model"
-                className="glass h-11 w-full appearance-none rounded-xl px-3.5 font-mono text-sm text-cream focus:border-gold/40 focus:outline-none"
-              >
-                {models.map((m) => <option key={m} value={m}>{m}</option>)}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
-            </div>
-            <div className="mt-3 flex items-center gap-3">
-              <Button variant="primary" size="sm" onClick={() => void save()} disabled={saving || !selected}>
-                {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save default"}
-              </Button>
-              {note && <span className="text-[11px] leading-snug text-faint">{note}</span>}
-            </div>
-          </>
-        )}
-      </Card>
-    </Panel>
-  );
-}
-
-function OllamaPanel({ sys }: { sys: SystemStatus | null }) {
-  const [st, setSt] = useState<{ running: boolean; models: string[]; detail: string } | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const check = useCallback(async () => {
-    setLoading(true);
-    try {
-      setSt(await providerApi.ollamaStatus());
-    } catch {
-      setSt({ running: false, models: [], detail: "backend unreachable" });
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void check();
-  }, [check]);
-
-  return (
-    <Panel>
-      <Card title="Connection" icon={Cpu}>
-        <div className="flex flex-wrap items-center gap-3 text-[13px]">
-          <StatusDot tone={loading ? "warn" : st?.running ? "ok" : "fail"} pulse={!!st?.running} />
-          <span className="text-cream">{loading ? "Checking…" : st?.running ? "Connected · localhost:11434" : "Not running"}</span>
-          <Button variant="ghost" size="sm" className="ml-auto" onClick={() => void check()}>
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Retry
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+            Provider
+            <select value={provider} onChange={(event) => setProvider(event.target.value)} className="glass h-11 w-full rounded-xl px-3 text-sm normal-case tracking-normal text-cream outline-none [&>option]:bg-charcoal">
+              <option value="gemini">Google Gemini</option>
+              <option value="groq">Groq</option>
+            </select>
+          </label>
+          <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
+            Task capability
+            <select value={task} onChange={(event) => setTask(event.target.value as ModelTask)} className="glass h-11 w-full rounded-xl px-3 text-sm normal-case tracking-normal text-cream outline-none [&>option]:bg-charcoal">
+              {tasks.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <select
+            value={selected}
+            onChange={(event) => setSelected(event.target.value)}
+            disabled={loading || models.length === 0}
+            aria-label="Validated models for selected task"
+            className="glass h-11 min-w-0 flex-1 rounded-xl px-3 font-mono text-[12px] text-cream outline-none [&>option]:bg-charcoal"
+          >
+            <option value="">{loading ? "Checking provider models…" : `No validated ${task.replaceAll("_", " ")} models`}</option>
+            {models.map((model) => <option key={model} value={model}>{model}</option>)}
+          </select>
+          <Button variant="subtle" size="sm" onClick={() => void loadModels(true)} disabled={loading}>
+            <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Refresh live list
+          </Button>
+          <Button variant="primary" size="sm" onClick={() => void save()} disabled={!selected || saving || !row?.has_key}>
+            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : task === "text" ? "Use as chat default" : "Re-check task"}
           </Button>
         </div>
-        {st && !st.running && (
-          <div className="mt-3 space-y-2">
-            <CopyChip text="ollama serve" />
-            {st.detail && <p className="font-mono text-[10px] text-faint/70">{st.detail}</p>}
-          </div>
-        )}
-        {sys?.ollama.models_running && sys.ollama.models_running.length > 0 && (
-          <p className="mt-3 text-[11px] text-faint">
-            Loaded now: {sys.ollama.models_running.map((m) => m.name).join(", ")}
-          </p>
-        )}
-      </Card>
-      <Card title={`Installed models ${st ? `(${st.models.length})` : ""}`} icon={HardDrive}>
-        {st?.models.length ? (
-          <div className="flex flex-wrap gap-2">
-            {st.models.map((m) => (
-              <span key={m} className="glass rounded-lg px-3 py-1.5 font-mono text-[12px] text-gold-bright">{m}</span>
-            ))}
-          </div>
-        ) : (
-          <p className="text-[12px] text-faint">None yet. Pull a starter:</p>
-        )}
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <CopyChip text="ollama pull qwen2.5:7b" label="balanced · 5GB" />
-          <CopyChip text="ollama pull qwen2.5:3b" label="tiny · 2GB" />
-          <CopyChip text="ollama pull llama3.1:8b" label="llama · 5GB" />
-          <CopyChip text="ollama pull gemma3:4b" label="gemma · 3GB" />
-        </div>
         <p className="mt-3 text-[11px] text-faint">
-          Any installed model works — Qwen, Llama, Gemma, Mistral, DeepSeek,
-          Phi, TinyLlama, CodeLlama. Pick the default in <b>AI Models</b>.
+          {row?.has_key ? `${row.label} · ${row.verified ? "provider verified" : "provider not verified"} · default: ${row.model_override ?? "not selected"}` : "Save and verify a provider key in API Keys before discovering models."}
         </p>
+        {error && <p role="status" className="mt-2 text-[11px] text-[#f49a96]">{error}</p>}
+        {note && <p role="status" className="mt-2 text-[11px] text-emerald-300">{note}</p>}
       </Card>
     </Panel>
   );
@@ -514,41 +520,35 @@ function ApiKeysPanel() {
   const [rows, setRows] = useState<ProviderConfig[]>([]);
   const [priority, setPriority] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Record<string, { key: string; baseUrl: string }>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
       const [cat, conf] = await Promise.all([providerApi.catalog(), providerApi.configured()]);
-      setCatalog(cat.providers.filter((p) => p.id !== "ollama"));
+      setCatalog(cat.providers);
       setRows(conf.providers);
-      setPriority(conf.priority.filter((p) => p !== "ollama"));
+      setPriority(conf.priority);
     } catch { /* offline */ }
   }, []);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const rowFor = (id: string) => rows.find((r) => r.provider === id);
+  useEffect(() => { void load(); }, [load]);
+  const rowFor = (id: string) => rows.find((row) => row.provider === id);
 
   const save = async (id: string, andVerify: boolean) => {
-    const d = draft[id] ?? { key: "", baseUrl: "" };
+    const key = draft[id] ?? "";
     setBusy(id);
     setNotice(null);
     try {
-      await providerApi.saveKey(id, {
-        ...(d.key.trim() ? { api_key: d.key } : {}),
-        ...(d.baseUrl.trim() ? { base_url: d.baseUrl } : {}),
-      });
-      setDraft((s) => ({ ...s, [id]: { key: "", baseUrl: "" } }));
+      await providerApi.saveKey(id, { api_key: key });
+      setDraft((current) => ({ ...current, [id]: "" }));
       if (andVerify) {
-        const r = await providerApi.verify(id);
-        setNotice(r.connected ? `${id}: connected ✓` : `${id}: ${r.detail}`);
+        const result = await providerApi.verify(id);
+        setNotice(result.connected ? `${rowFor(id)?.label ?? id}: key and text model verified.` : `${id}: ${result.detail}`);
       }
       await load();
     } catch (err) {
-      setNotice(err instanceof ApiError ? err.message : "Save failed.");
+      setNotice(err instanceof ApiError ? err.message : "Could not save or verify this provider.");
     } finally {
       setBusy(null);
     }
@@ -556,17 +556,23 @@ function ApiKeysPanel() {
 
   const verify = async (id: string) => {
     setBusy(id);
+    setNotice(null);
     try {
-      const r = await providerApi.verify(id);
-      setNotice(r.connected ? `${id}: connected ✓` : `${id}: ${r.detail}`);
+      const result = await providerApi.verify(id);
+      setNotice(result.connected ? `${rowFor(id)?.label ?? id}: connected with ${result.verification_model}.` : `${id}: ${result.detail}`);
       await load();
-    } finally {
-      setBusy(null);
-    }
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Provider verification failed.");
+    } finally { setBusy(null); }
   };
 
   const toggle = async (id: string, enabled: boolean) => {
-    await providerApi.toggle(id, enabled).catch(() => undefined);
+    try {
+      await providerApi.toggle(id, enabled);
+      setNotice(`${rowFor(id)?.label ?? id}: ${enabled ? "enabled" : "disabled"}.`);
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not change provider state.");
+    }
     await load();
   };
 
@@ -574,133 +580,91 @@ function ApiKeysPanel() {
     setBusy(id);
     try {
       await providerApi.removeKey(id);
-      setNotice(`${id}: key removed from this machine.`);
+      setNotice(`${rowFor(id)?.label ?? id}: saved key removed from this server.`);
       await load();
-    } finally {
-      setBusy(null);
-    }
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not remove provider key.");
+    } finally { setBusy(null); }
   };
 
   const move = async (id: string, dir: -1 | 1) => {
-    const order = ["ollama", ...priority];
-    const i = order.indexOf(id);
-    const j = i + dir;
-    if (i < 1 || j < 1 || j >= order.length) return; // ollama stays pinned at #1 unless user moves it below explicitly
-    [order[i], order[j]] = [order[j], order[i]];
-    const r = await providerApi.setPriority(order).catch(() => null);
-    if (r) setPriority(r.priority.filter((p) => p !== "ollama"));
+    const order = [...priority];
+    const index = order.indexOf(id);
+    const next = index + dir;
+    if (index < 0 || next < 0 || next >= order.length) return;
+    [order[index], order[next]] = [order[next], order[index]];
+    const result = await providerApi.setPriority(order).catch(() => null);
+    if (result) setPriority(result.priority);
   };
+
+  const labelFor = (id: string) => catalog.find((provider) => provider.id === id)?.label ?? id;
 
   return (
     <Panel>
       <Card title="How keys live here" icon={ShieldCheck}>
         <p className="text-[12px] leading-relaxed text-muted">
-          Keys are encrypted on disk (Fernet, machine-bound secret), never
-          logged, and only ever readable by this backend. You always see the
-          last 4 characters — nothing more, not even here.
+          Provider keys are encrypted on the backend with a server-side secret. They are never sent back to the browser, exposed in URLs, or stored in browser storage. The UI shows only a non-reversible key hint.
         </p>
       </Card>
 
-      <Card title="Failover priority" icon={Cloud}>
-        <p className="mb-2 text-[11px] text-faint">
-          If a provider dies mid-session, the next one answers before the first
-          token — with a visible handoff line in the chat.
+      <Card title="Automatic failover priority" icon={Cloud}>
+        <p className="mb-3 text-[11px] text-faint">
+          Vednix tries compatible verified providers in this order. It switches only before the first response token and labels the handoff in chat.
         </p>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="glass flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-semibold text-gold-bright">
-            1 · Engine
-          </span>
-          {priority.filter((id) => rowFor(id)?.enabled && rowFor(id)?.has_key).map((id, i) => (
-            <span key={id} className="glass rounded-lg px-2.5 py-1.5 text-[11px] text-muted">{i + 2} · {id}</span>
+        <div className="space-y-2">
+          {priority.map((id, index) => (
+            <div key={id} className="glass flex items-center gap-2 rounded-xl px-3 py-2">
+              <span className="w-6 font-mono text-[11px] text-gold-bright">{index + 1}.</span>
+              <span className="min-w-0 flex-1 text-[12px] text-cream">{labelFor(id)}</span>
+              <span className="text-[10px] text-faint">{rowFor(id)?.enabled && rowFor(id)?.verified ? "ready" : "not ready"}</span>
+              <button onClick={() => void move(id, -1)} aria-label={`Raise ${labelFor(id)} priority`} className="rounded-md p-1.5 text-faint hover:text-gold-bright"><ArrowUp className="h-3.5 w-3.5" /></button>
+              <button onClick={() => void move(id, 1)} aria-label={`Lower ${labelFor(id)} priority`} className="rounded-md p-1.5 text-faint hover:text-gold-bright"><ArrowDown className="h-3.5 w-3.5" /></button>
+            </div>
           ))}
         </div>
       </Card>
 
-      {notice && (
-        <p className="glass rounded-xl px-4 py-2.5 text-center text-[12px] text-gold-bright">{notice}</p>
-      )}
+      {notice && <p role="status" className="glass rounded-xl px-4 py-2.5 text-center text-[12px] text-gold-bright">{notice}</p>}
 
       <div className="space-y-3">
-        {catalog.map((p, idx) => {
-          const row = rowFor(p.id);
-          const d = draft[p.id] ?? { key: "", baseUrl: "" };
-          const statusTone = !row ? "idle" : row.status === "connected" ? "ok" : row.status === "failed" ? "fail" : "warn";
+        {catalog.map((provider, index) => {
+          const row = rowFor(provider.id);
+          const key = draft[provider.id] ?? "";
+          const tone = !row ? "idle" : row.status === "connected" ? "ok" : row.status === "failed" ? "fail" : "warn";
           return (
-            <motion.div
-              key={p.id}
-              className={cn("glass-strong rounded-2xl p-5", row && !row.enabled && "opacity-60")}
-              initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: idx * 0.04, duration: 0.35 }}
-            >
+            <motion.div key={provider.id} className={cn("glass-strong rounded-2xl p-5", row && !row.enabled && "opacity-80")} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.04, duration: 0.35 }}>
               <div className="flex flex-wrap items-center gap-3">
-                <StatusDot tone={statusTone} pulse={row?.status === "connected"} />
-                <span className="font-display text-base font-bold text-cream">{p.label}</span>
-                {row?.key_hint && (
-                  <code className="rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[11px] text-muted">{row.key_hint}</code>
-                )}
-                {row && (
-                  <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">
-                    {row.enabled ? (row.status === "connected" ? "connected" : row.status) : "disabled"}
-                  </span>
-                )}
-                <span className="ml-auto flex items-center gap-1">
-                  <button onClick={() => void move(p.id, -1)} aria-label="Raise priority" className="rounded-md p-1.5 text-faint hover:text-gold-bright"><ArrowUp className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => void move(p.id, 1)} aria-label="Lower priority" className="rounded-md p-1.5 text-faint hover:text-gold-bright"><ArrowDown className="h-3.5 w-3.5" /></button>
-                </span>
+                <StatusDot tone={tone} pulse={row?.status === "connected"} />
+                <span className="font-display text-base font-bold text-cream">{provider.label}</span>
+                {row?.key_hint && <code className="rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[11px] text-muted">{row.key_hint}</code>}
+                {row && <span className="font-mono text-[9px] uppercase tracking-[0.18em] text-faint">{row.enabled ? row.status : "disabled"}</span>}
               </div>
-
-              <p className="mt-1.5 text-[11px] text-faint">{p.blurb}</p>
-
+              <p className="mt-1.5 text-[11px] text-faint">{provider.blurb}</p>
               <div className="mt-3 flex flex-col gap-2">
                 <div className="flex flex-wrap gap-2">
-                  {(p.needs_key || p.kind === "custom") && (
-                    <input
-                      type="password"
-                      value={d.key}
-                      onChange={(e) => setDraft((s) => ({ ...s, [p.id]: { ...d, key: e.target.value } }))}
-                      placeholder={row?.has_key ? "Replace key (sk-…)" : "Paste API key (sk-…)"}
-                      aria-label={`${p.label} API key`}
-                      autoComplete="off"
-                      className="glass h-10 min-w-0 flex-1 rounded-xl px-3 font-mono text-sm text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
-                    />
-                  )}
-                  {p.kind === "custom" && (
-                    <input
-                      value={d.baseUrl}
-                      onChange={(e) => setDraft((s) => ({ ...s, [p.id]: { ...d, baseUrl: e.target.value } }))}
-                      placeholder="http://localhost:1234/v1"
-                      aria-label="Base URL"
-                      className="glass h-10 min-w-0 flex-1 rounded-xl px-3 font-mono text-sm text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
-                    />
-                  )}
+                  <input
+                    type="password" value={key}
+                    onChange={(event) => setDraft((current) => ({ ...current, [provider.id]: event.target.value }))}
+                    placeholder={row?.has_key ? "Replace saved key (optional)" : "Paste API key"}
+                    aria-label={`${provider.label} API key`} autoComplete="off" spellCheck={false}
+                    className="glass h-10 min-w-0 flex-1 rounded-xl px-3 font-mono text-sm text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
+                  />
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="primary" size="sm" onClick={() => void save(p.id, true)}
-                    disabled={busy === p.id || (!d.key.trim() && !d.baseUrl.trim() && !row?.has_key)}>
-                    {busy === p.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : row?.has_key ? "Update & test" : "Save & test"}
+                  <Button variant="primary" size="sm" onClick={() => void save(provider.id, true)} disabled={busy === provider.id || (!key.trim() && !row?.has_key)}>
+                    {busy === provider.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : row?.has_key ? "Save & verify" : "Save key & verify"}
                   </Button>
-                  {row?.has_key && (
-                    <>
-                      <Button variant="subtle" size="sm" onClick={() => void verify(p.id)} disabled={busy === p.id}>
-                        Test
-                      </Button>
-                      <Button variant="subtle" size="sm" onClick={() => void toggle(p.id, !row.enabled)}>
-                        {row.enabled ? "Disable" : "Enable"}
-                      </Button>
-                      <Button variant="danger" size="sm" onClick={() => void remove(p.id)} disabled={busy === p.id}>
-                        <Trash2 className="h-3.5 w-3.5" /> Remove
-                      </Button>
-                    </>
-                  )}
-                  {p.key_url && (
-                    <a href={p.key_url} target="_blank" rel="noreferrer" className="ml-auto text-[11px] text-gold-bright hover:underline">
-                      get a key ↗
-                    </a>
-                  )}
+                  {row?.has_key && <>
+                    <Button variant="subtle" size="sm" onClick={() => void verify(provider.id)} disabled={busy === provider.id}>Test connection</Button>
+                    <Button variant="subtle" size="sm" onClick={() => void toggle(provider.id, !row.enabled)} disabled={!row.enabled && !(row.verified && row.status === "connected")}>
+                      {row.enabled ? "Disable" : "Enable"}
+                    </Button>
+                    <Button variant="danger" size="sm" onClick={() => void remove(provider.id)} disabled={busy === provider.id}><Trash2 className="h-3.5 w-3.5" /> Remove</Button>
+                  </>}
+                  <a href={provider.key_url} target="_blank" rel="noreferrer" className="ml-auto text-[11px] text-gold-bright hover:underline">Get a key ↗</a>
                 </div>
-                {row?.status === "failed" && row.status_detail && (
-                  <p className="text-[11px] leading-snug text-[#f49a96]">{row.status_detail}</p>
-                )}
+                {row?.status === "failed" && row.status_detail && <p className="text-[11px] leading-snug text-[#f49a96]">{row.status_detail}</p>}
+                {row?.model_override && <p className="text-[11px] text-faint">Verified text model: <code className="font-mono text-muted">{row.model_override}</code> · change it in AI Models.</p>}
               </div>
             </motion.div>
           );
@@ -716,8 +680,8 @@ function MemoryPanel({ sys }: { sys: SystemStatus | null }) {
       <Card title="Long-term memory" icon={MemoryStick}>
         <p className="mb-3 text-[13px] text-muted">
           <b className="text-cream">{sys?.counts.memories ?? "—"}</b> facts stored
-          on this machine. The top 5 ride into the system prompt of every
-          conversation — Hindi, Hinglish or English.
+          by this Vednix backend. Relevant memory can be included in provider
+          requests to personalize your conversations.
         </p>
         <Link href="/chat?view=memory">
           <Button variant="subtle" size="sm">Open the Memory view</Button>
@@ -725,7 +689,7 @@ function MemoryPanel({ sys }: { sys: SystemStatus | null }) {
       </Card>
       <Card title="Knowledge base" icon={Database}>
         <p className="mb-3 text-[13px] text-muted">
-          Documents are chunked + FTS5-indexed on-device and cited into answers.
+          Documents are chunked and indexed by this Vednix backend; retrieved excerpts may be included in provider requests.
           Manage them in the Knowledge view.
         </p>
         <Link href="/chat?view=knowledge">
@@ -747,7 +711,7 @@ function PrivacyPanel({ reload }: { reload: () => Promise<void> }) {
     setDetail(null);
     try {
       const r = await onboardingApi.wipeData();
-      setDetail(`Wiped ${r.conversations_deleted} conversations and ${r.memories_deleted} memories from this machine.`);
+      setDetail(`Wiped ${r.conversations_deleted} conversations and ${r.memories_deleted} memories from this backend.`);
       setState("ok");
       await reload();
       await bootstrap();
@@ -759,18 +723,18 @@ function PrivacyPanel({ reload }: { reload: () => Promise<void> }) {
 
   return (
     <Panel>
-      <Card title="Local-first, in numbers" icon={ShieldCheck}>
+      <Card title="Data boundaries" icon={ShieldCheck}>
         <ul className="space-y-1.5 text-[12px] leading-relaxed text-muted">
-          <li>· <b className="text-cream">0</b> telemetry events, ever — there is no analytics code to disable</li>
-          <li>· Network calls happen only <i>when you make them</i>: the Vednix Engine on localhost, plus any cloud provider you personally configure</li>
-          <li>· Passwords are PBKDF2 digests; API keys are Fernet-encrypted with a machine-bound secret</li>
-          <li>· The whole app keeps answering even when the internet doesn't (cloud providers excluded, obviously)</li>
+          <li>· Provider requests are sent only to the Gemini or Groq account you configure.</li>
+          <li>· Passwords are PBKDF2 digests; API keys are Fernet-encrypted with a server-side secret.</li>
+          <li>· Conversation history, uploads, and provider configuration are managed by your Vednix backend.</li>
+          <li>· Vednix does not claim offline chat when no provider is reachable.</li>
         </ul>
       </Card>
       <Card title="Danger zone" icon={Trash2}>
         <p className="mb-3 text-[12px] leading-relaxed text-muted">
           Wipes every conversation ({chatWipe}) and long-term memory from this
-          machine. Uploaded files and knowledge documents stay (clear them in
+          backend. Uploaded files and knowledge documents stay (clear them in
           their views — they were added file-by-file, on purpose).
         </p>
         <Button variant="danger" size="sm" onClick={() => void wipe()} disabled={state === "busy"}>
@@ -814,12 +778,12 @@ function AboutPanel() {
     <Panel>
       <Card title="Vednix AI" icon={Sparkles}>
         <p className="text-[13px] leading-relaxed text-muted">
-          The AI Operating System — private-first, multilingual, premium by
-          default. Next.js 15 + FastAPI + SQLAlchemy + LangGraph research, all
-          orchestrated around an 8-state neural core.
+          The AI Operating System — multilingual, premium by default, with a
+          server-side provider boundary. Next.js 15 + FastAPI + SQLAlchemy +
+          LangGraph research, orchestrated around an 8-state neural core.
         </p>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {["131 tests green", "8 neural states", "0 telemetry", "हिंदी · Hinglish · English"].map((t) => (
+          {["Gemini + Groq", "Live model checks", "0 telemetry", "हिंदी · Hinglish · English"].map((t) => (
             <span key={t} className="glass rounded-lg px-2.5 py-1.5 font-mono text-[10px] text-muted">{t}</span>
           ))}
         </div>
@@ -827,7 +791,7 @@ function AboutPanel() {
       <Card title="Credits" icon={Info}>
         <div className="flex flex-col items-center gap-3 py-4">
           <p className="text-center text-[11px] leading-relaxed text-faint">
-            Designed and engineered with an obsession for local-first AI.
+            Designed around provider choice, live model validation, and server-side key protection.
           </p>
         </div>
       </Card>
@@ -878,8 +842,8 @@ function AdminPanel() {
     <Panel>
       <Card title="Owner console" icon={Users}>
         <p className="text-[12px] leading-relaxed text-muted">
-          You own this machine. Every account answers to you — reset a
-          password, sign a user out everywhere, or remove them entirely.
+          You administer this Vednix workspace — reset a password, sign a user
+          out everywhere, or remove an account entirely.
           The last owner can never be removed (the door would brick itself).
         </p>
       </Card>

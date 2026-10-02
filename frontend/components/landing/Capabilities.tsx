@@ -12,8 +12,8 @@ import { MicroLabel, RevealInView } from "./shared";
 const ITEMS = [
   {
     icon: Cpu,
-    title: "Local-first intelligence",
-    body: "Streams tokens from the Vednix Engine on your own machine. Model, temperature and language, dialled in live — Hindi, Hinglish or English.",
+    title: "Provider-powered intelligence",
+    body: "Connect Google Gemini or Groq, choose a verified model, and stream replies in Hindi, Hinglish or English.",
     tag: "engine.stream_reply",
   },
   {
@@ -31,7 +31,7 @@ const ITEMS = [
   {
     icon: Brain,
     title: "Memory that endures",
-    body: "Conversations, facts and preferences persist in SQLite — searchable, deletable, and never sent anywhere.",
+    body: "Conversations and saved facts persist in your Vednix backend. Relevant context may be included in requests to the provider you choose.",
     tag: "memory.sqlite",
   },
   {

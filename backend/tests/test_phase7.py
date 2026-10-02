@@ -1,7 +1,5 @@
-"""Phase 7 — onboarding, accounts (JWT sessions), encrypted provider keys,
-and the priority router with failover. Every claim is exercised for real:
-HTTP flows via TestClient, services via the async db fixture, and provider
-verification with monkeypatched transport (tests never hit real networks).
+"""Authentication, encrypted credentials, onboarding, and account lifecycle regressions.
+Provider network behavior is covered by the dedicated mocked provider pipeline tests.
 """
 
 from __future__ import annotations
@@ -10,8 +8,6 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from ai_engine.cloud_client import OpenAICompatibleClient
-from ai_engine.ollama_client import OllamaError
 from core.crypto import KeyVault
 from core.tokens import (
     TokenError,
@@ -22,7 +18,6 @@ from core.tokens import (
     verify_password,
 )
 from main import create_app
-from services.providers import ResilientLLM
 from tests.conftest import FakeLLM
 
 
@@ -173,194 +168,6 @@ def test_validation_rejects_bad_register(settings):
 
 
 # =============================================================================
-# providers: catalog, encrypted storage, verify, priority (service + HTTP)
-# =============================================================================
-
-def test_catalog_exposes_ten_providers_without_secrets(settings):
-    with TestClient(create_app(settings=settings)) as client:
-        data = client.get("/api/providers/catalog").json()["providers"]
-        ids = {p["id"] for p in data}
-        assert ids == {"ollama", "openrouter", "gemini", "groq", "openai", "anthropic",
-                       "mistral", "together", "fireworks", "custom"}
-        gemini = next(p for p in data if p["id"] == "gemini")
-        assert gemini["key_url"].startswith("https://") and gemini["needs_key"] is True
-        assert not any("api_key" in p or "ciphertext" in p for p in data)
-
-
-def test_provider_key_lifecycle_never_echoes_plaintext(settings):
-    with TestClient(create_app(settings=settings)) as client:
-        stored = client.put("/api/providers/gemini/key", json={"api_key": "AIza-test-key-9999"})
-        assert stored.status_code == 200, stored.text
-        body = stored.json()
-        assert body["key_hint"] == "…9999"
-        assert "key" not in body.get("key_hint", "").replace("9999", "")
-        assert body["has_key"] is True and body["status"] == "unverified"
-
-        listed = client.get("/api/providers").json()
-        assert listed["priority"][0] == "ollama"  # spec: Ollama is #1 by default
-        gemini = next(p for p in listed["providers"] if p["provider"] == "gemini")
-        assert gemini["key_hint"] == "…9999"
-
-        # ciphertext lives server-side and is NOT the plaintext
-        providers = client.app.state.providers
-        import anyio
-        row = anyio.run(providers._row, "gemini")
-        assert row.key_ciphertext and "AIza-test-key-9999" not in row.key_ciphertext
-        assert providers._vault.decrypt(row.key_ciphertext) == "AIza-test-key-9999"
-
-        # toggle off → router ignores it; remove → 204 then 404
-        assert client.post("/api/providers/gemini/toggle", json={"enabled": False}).status_code == 200
-        assert client.delete("/api/providers/gemini/key").status_code == 204
-        assert client.delete("/api/providers/gemini/key").status_code == 404
-
-
-def test_priority_reorder(settings):
-    with TestClient(create_app(settings=settings)) as client:
-        resp = client.put("/api/providers/priority", json={"order": ["groq", "ollama", "gemini"]})
-        order = resp.json()["priority"]
-        assert order[:3] == ["groq", "ollama", "gemini"]
-        assert set(order) == set(client.get("/api/providers").json()["priority"])
-
-
-async def test_verify_marks_row_connected_with_mocked_transport(db, settings):
-    from core.crypto import KeyVault
-    from services.providers import ProviderService
-
-    service = ProviderService(db[1], KeyVault(b"s" * 48))
-    await service.upsert_key("gemini", api_key="AIza-test")
-
-    async def fake_list(self):
-        return ["gemini-2.0-flash", "gemini-1.5-pro"]
-
-    original = OpenAICompatibleClient.list_models
-    OpenAICompatibleClient.list_models = fake_list
-    try:
-        result = await service.verify("gemini", settings=settings)
-    finally:
-        OpenAICompatibleClient.list_models = original
-
-    assert result["connected"] is True
-    assert result["models"] == ["gemini-2.0-flash", "gemini-1.5-pro"]
-    row = await service._row("gemini")
-    assert row.status == "connected" and row.verified_at is not None
-
-    # ollama down in the test env ⇒ a clean negative, not a crash
-    down = await service.verify("ollama", settings=settings)
-    assert down["connected"] is False and down["detail"]
-
-
-# =============================================================================
-# ResilientLLM — the priority router with pre-first-token failover
-# =============================================================================
-
-class _FakeCloud:
-    provider_name = "Google Gemini"
-    model = "gemini-2.0-flash"
-
-    async def is_available(self):
-        return True
-
-    async def chat(self, messages, temperature, *, model=None, images=None):
-        return "cloud answer"
-
-    async def chat_stream(self, messages, temperature, *, model=None, images=None):
-        for chunk in ["cloud ", "answer"]:
-            yield chunk
-
-    async def list_models(self):
-        return ["gemini-2.0-flash"]
-
-    async def list_models_cached(self, ttl=120.0):
-        return ["gemini-2.0-flash"]
-
-    def supports_images(self, model=None):
-        return True
-
-    async def aclose(self):
-        return None
-
-
-async def test_router_fails_over_with_visible_handoff(db, settings):
-    from core.crypto import KeyVault
-    from services.providers import ProviderService
-
-    service = ProviderService(db[1], KeyVault(b"s" * 48))
-    await service.upsert_key("gemini", api_key="AIza-test")
-    real_build = service.build_client
-    service.build_client = lambda provider, row, *, settings: _FakeCloud() if provider != "ollama" else real_build(provider, row, settings=settings)
-
-    router = ResilientLLM(FakeLLM(offline=True), service, settings)
-    chunks = [chunk async for chunk in router.chat_stream([{"role": "user", "content": "hi"}], 0.5)]
-    assert chunks[0].startswith("⚡ Vednix Engine unreachable — answered by **Google Gemini**")
-    assert "".join(chunks[1:]) == "cloud answer"
-    assert router.active_label == "Google Gemini"
-
-
-async def test_router_all_providers_down_gives_actionable_error(db, settings):
-    from core.crypto import KeyVault
-    from services.providers import ProviderService
-
-    service = ProviderService(db[1], KeyVault(b"s" * 48))  # nothing configured
-    router = ResilientLLM(FakeLLM(offline=True), service, settings)
-    with pytest.raises(OllamaError) as excinfo:
-        [chunk async for chunk in router.chat_stream([{"role": "user", "content": "hi"}], 0.5)]
-    assert "No AI provider is reachable" in str(excinfo.value)
-    assert "Settings → AI Providers" in str(excinfo.value)
-
-
-# =============================================================================
-# onboarding — mode choice (no-signup-no-entry)
-# =============================================================================
-
-def test_retired_modes_are_rejected(settings):
-    """NO SIGNUP, NO ENTRY (Phase 8): guest and demo are retired — only free
-    and cloud remain valid modes; anything else dies at the schema door."""
-    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
-        status = client.get("/api/onboarding/status").json()
-        assert status["setup_complete"] is False
-        assert status["auth_enabled"] is False
-        assert status["active_provider"]  # router label present
-        assert "demo_active" not in status  # gate retired, not merely hidden
-
-        for retired in ("guest", "demo"):
-            resp = client.post("/api/onboarding/mode", json={"mode": retired})
-            assert resp.status_code == 422, retired
-
-        # the real modes still complete first-run cleanly
-        choice = client.post("/api/onboarding/mode", json={"mode": "free"}).json()
-        assert choice["mode"] == "free" and choice["setup_complete"] is True
-
-
-def test_onboarding_free_mode_completes_setup_and_rearms_engine(settings):
-    with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
-        done = client.post("/api/onboarding/mode", json={"mode": "free"}).json()
-        assert done["mode"] == "free" and done["setup_complete"] is True
-        with client.websocket_connect("/ws/chat") as ws:
-            ws.send_text('{"type":"user_message","content":"hello after setup"}')
-            # brand-new conversation: created frame lands before the generation
-            assert ws.receive_json()["type"] == "conversation_created"
-            assert ws.receive_json()["type"] == "message_started"
-            # drain to completion — closing mid-stream wedges the sync
-            # TestClient portal on teardown (cancel-scope cleanup stall)
-            for _ in range(12):
-                if ws.receive_json()["type"] == "message_done":
-                    break
-            else:
-                raise AssertionError("stream never produced message_done")
-
-
-def test_local_models_catalog_is_honest(settings):
-    with TestClient(create_app(settings=settings)) as client:
-        models = client.get("/api/onboarding/local-models").json()["models"]
-        assert len(models) >= 7
-        tiny = next(m for m in models if m["tier"] == "Tiny")
-        assert tiny["tag"] == "qwen2.5:3b" and tiny["ram_gb"] == 4
-        for m in models:
-            assert m["disk_gb"] > 0 and m["pull"].startswith("ollama pull ")
-            assert m["download_size_gb"] == m["disk_gb"] if "download_size_gb" in m else True
-
-
-# =============================================================================
 # refresh-token reuse detection at the service level (theft ⇒ revoked chain)
 # =============================================================================
 
@@ -388,7 +195,7 @@ async def test_refresh_rotation_and_get_user_by_session(db, settings):
 
 
 # =============================================================================
-# Phase 7b/8 — data wipe, system status, ollama default model
+# Data wipe and system status
 # =============================================================================
 
 def test_wipe_data_erases_chats_and_memories(settings):
@@ -412,24 +219,13 @@ def test_wipe_data_erases_chats_and_memories(settings):
             len((client.get("/api/memory").json() or {}).get("items", [])) == 0
 
 
-def test_system_status_and_ollama_default_model(settings):
+def test_system_status_is_provider_neutral(settings):
     with TestClient(create_app(settings=settings, llm_client=FakeLLM())) as client:
-        # default-model endpoint needs the real router — use an app without
-        # llm injection for that part; system status works on any app.
         status = client.get("/api/system/status").json()
         assert status["cpu"]["cores"] >= 1
         assert status["db_bytes"] > 0
         assert status["counts"]["conversations"] == 0
-        assert status["ollama"]["models_running"] == []
-
-    with TestClient(create_app(settings=settings)) as client:  # real ResilientLLM
-        before = client.get("/api/providers/ollama/default-model").json()
-        assert before["saved"] is False and before["model"] == "fake-model"
-        put = client.put(
-            "/api/providers/ollama/default-model", json={"model": "qwen2.5:7b"}
-        )
-        assert put.status_code == 200 and put.json()["saved"] is True
-        after = client.get("/api/providers/ollama/default-model").json()
-        assert after["model"] == "qwen2.5:7b" and after["saved"] is True
+        assert status["providers"] == []
         health = client.get("/api/health").json()
-        assert health["default_model"] == "qwen2.5:7b"  # live-applied to the router
+        assert health["status"] == "ok"
+        assert health["chat_available"] is True

@@ -12,9 +12,9 @@ import { ArrowUpRight, Check, Copy } from "lucide-react";
 import { MicroLabel, RevealInView } from "./shared";
 
 const COMMANDS = [
-  { cmd: "ollama pull qwen2.5:3b", note: "your local brain" },
-  { cmd: "python backend/main.py", note: "FastAPI core · :8000" },
-  { cmd: "npm --prefix frontend run dev", note: "Next.js shell · :3000" },
+  { cmd: "python -m pip install -r backend/requirements.txt", note: "FastAPI + provider adapters" },
+  { cmd: "uvicorn main:app --app-dir backend --reload --port 8000", note: "Vednix API · :8000" },
+  { cmd: "npm --prefix frontend run dev", note: "Next.js workspace · :3000" },
 ];
 
 export function EnterSection() {
@@ -41,8 +41,7 @@ export function EnterSection() {
             <span className="text-gold-gradient">you are.</span>
           </h2>
           <p className="mx-auto mt-6 max-w-md text-[15px] leading-relaxed text-muted">
-            Three commands. One local model. A workspace that answers in your language — on the
-            machine you already own.
+            Three setup commands. Connect Google Gemini or Groq with a key you control, then work in a multilingual AI workspace.
           </p>
         </RevealInView>
 

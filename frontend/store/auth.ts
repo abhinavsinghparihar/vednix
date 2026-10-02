@@ -2,7 +2,7 @@
  * Auth & entry-state store — ONE place answering three questions:
  *   1. Has this machine finished first-run setup?      (onboarding)
  *   2. Is anyone signed in, must anyone be?            (auth enabled + user)
- *   3. Which run mode is the shell in?                 (free|cloud)
+ *   3. Which workspace mode is the shell in?            (provider-backed cloud)
  *
  * Route guards consume `bootstrap()`; pages consume the flags. The access
  * token itself never lives here — it lives in the tokenVault (module memory).
@@ -53,7 +53,7 @@ export const useAuth = create<AuthState>((set, get) => ({
       set({ checked: true });
       return {
         setup_complete: true, mode: null,
-        auth_enabled: false, ollama_running: false, active_provider: "Vednix Engine",
+        auth_enabled: false, providers: [], active_provider: "unavailable", chat_available: false,
       };
     }
     let session: SessionState = "anon";

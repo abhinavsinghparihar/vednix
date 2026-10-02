@@ -43,7 +43,7 @@ function StatCard({ label, value, sub, icon: Icon, delay }: {
 export function DashboardView() {
   const {
     conversations, selectConversation, newChat, setView,
-    modelOptions, activeModel, ollamaAvailable, coreState,
+    modelOptions, activeModel, chatAvailable, coreState,
   } = useChat();
   const [memoryCount, setMemoryCount] = useState<number | null>(null);
   const [docCount, setDocCount] = useState<number | null>(null);
@@ -82,8 +82,8 @@ export function DashboardView() {
         </h1>
         <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted">
           Vednix is{" "}
-          <span className={cn("font-semibold", ollamaAvailable ? "text-gold-bright" : "text-danger")}>
-            {ollamaAvailable ? "live and local" : "backend not reachable"}
+          <span className={cn("font-semibold", chatAvailable ? "text-gold-bright" : "text-danger")}>
+            {chatAvailable ? "chat provider ready" : "no verified chat provider"}
           </span>
           . Pick up where you left off, or start something new.
         </p>
@@ -113,7 +113,7 @@ export function DashboardView() {
         {/* live stats — every number is real */}
         <div className="mt-9 grid grid-cols-2 gap-3 lg:grid-cols-4">
           <StatCard icon={MessageSquare} label="conversations" value={conversations.length} sub="streaming · multilingual" delay={0} />
-          <StatCard icon={BrainCircuit} label="memories" value={memoryCount ?? "…"} sub="long-term, on-device" delay={60} />
+          <StatCard icon={BrainCircuit} label="memories" value={memoryCount ?? "…"} sub="long-term, backend-stored" delay={60} />
           <StatCard icon={BookOpen} label="knowledge docs" value={docCount ?? "…"} sub="FTS5 · cited answers" delay={120} />
           <StatCard icon={MessageSquarePlus} label="models" value={modelOptions.length || "…"} sub={`default · ${activeModel ?? "auto"}`} delay={180} />
         </div>

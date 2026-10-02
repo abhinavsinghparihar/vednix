@@ -1,7 +1,7 @@
 /**
  * /profile — who you are on this machine: avatar monogram, username, email,
- * membership (owner/member), the AI provider & local model currently live,
- * honest machine stats (db/uploads bytes, counts, CPU, Engine VRAM residency),
+ * membership (owner/member), the active AI provider/model,
+ * honest backend stats (database/uploads, counts, CPU, provider readiness),
  * signed-in devices with revoke, password change, and sign-out.
  * No signup, no entry — this page only exists behind a session.
  */
@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Activity, ArrowLeft, CheckCircle2, Cpu, Database, HardDrive, KeyRound, Loader2, LogOut,
-  MonitorSmartphone, ShieldCheck, Trash2, XCircle,
+  MonitorSmartphone, ShieldCheck, Trash2,
 } from "lucide-react";
 import {
   authApi, systemApi, type SessionInfo, type SystemStatus,
@@ -159,7 +159,7 @@ function ProfileInner() {
                 {user ? (user.role === "owner" ? "Owner membership" : "Member") : "…"}
               </span>
               <span className="rounded-md bg-white/[0.06] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted">
-                {sys?.active_provider ?? onboarding?.active_provider ?? "Vednix Engine"}
+                {sys?.active_provider_label ?? onboarding?.active_provider ?? "unavailable"}
               </span>
               <span className="rounded-md bg-white/[0.06] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.18em] text-muted">
                 model · {sys?.default_model ?? "—"}
@@ -196,16 +196,15 @@ function ProfileInner() {
                 CPU · <b className="text-cream">{sys?.cpu.cores ?? "—"} cores</b>
                 {sys?.cpu.load1 != null && <span className="text-faint"> · load {sys.cpu.load1}</span>}
               </span>
-              {sys?.ollama.models_running.map((m) => (
-                <span key={m.name} className="glass rounded-xl px-3 py-2">
-                  <b className="font-mono text-[12px] text-gold-bright">{m.name}</b>
-                  <span className="text-faint"> · {humanBytes(m.size)} · {m.size_vram > 0 ? `${humanBytes(m.size_vram)} on GPU` : "on CPU"}</span>
+              {sys?.providers?.map((provider) => (
+                <span key={provider.provider} className="glass flex items-center gap-2 rounded-xl px-3 py-2">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", provider.chat_available ? "bg-emerald-400" : "bg-[#f0746e]")} />
+                  <b className="text-[12px] text-cream">{provider.label}</b>
+                  <span className="text-faint">· {provider.model || "no model selected"}</span>
                 </span>
               ))}
-              {sys && !sys.ollama.running && (
-                <span className="flex items-center gap-2 text-[12px] text-faint">
-                  <XCircle className="h-3.5 w-3.5 text-[#f0746e]" /> Engine stopped — no local models loaded
-                </span>
+              {sys && !sys.providers?.some((provider) => provider.chat_available) && (
+                <span className="text-[12px] text-faint">No verified chat provider is ready. Configure Gemini or Groq in Settings.</span>
               )}
             </div>
           </Section>

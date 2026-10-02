@@ -46,8 +46,8 @@ export function MemoryView() {
               Long-term <span className="text-gold-gradient">memory.</span>
             </h1>
             <p className="mt-3 max-w-lg text-sm leading-relaxed text-muted">
-              Facts and preferences Vednix keeps across sessions — stored in SQLite on your
-              machine, searchable, deletable, never sent anywhere.
+              Facts and preferences Vednix keeps across sessions — stored by this backend,
+              searchable, and deletable. Relevant memories may be included in provider requests.
             </p>
           </div>
         </div>

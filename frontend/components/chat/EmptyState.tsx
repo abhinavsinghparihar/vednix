@@ -49,7 +49,7 @@ export function EmptyState() {
       >
         Your personal AI workspace — Hindi, Hinglish या English, किसी भी भाषा में बात कीजिए.
         <br />
-        Everything runs on <span className="text-gold/90">your machine</span>. Nothing leaves it.
+        Connect Gemini or Groq and chat in <span className="text-gold/90">your language</span>.
       </motion.p>
 
       <div className="mt-9 grid w-full max-w-xl grid-cols-1 gap-2.5 sm:grid-cols-2">

@@ -30,6 +30,7 @@ OPEN_PATHS = (
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/refresh",
+    "/api/auth/csrf",
     # logout authenticates via the refresh cookie + CSRF pair — it MUST work
     # even after the (20-minute) access token has expired
     "/api/auth/logout",

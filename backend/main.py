@@ -1,11 +1,10 @@
 """
 Vednix AI — FastAPI application.
 
-Run:  uvicorn main:app --reload --port 8000    (from backend/)
-or:   python main.py
+Run:  uvicorn main:app --reload --port 8000 (from backend/)
 
-create_app() accepts optional injected settings/LLM so tests never need a real
-Ollama instance.
+create_app() accepts optional injected settings/LLM so tests can use a fully
+controlled provider transport without real keys or external calls.
 """
 
 from __future__ import annotations
@@ -14,6 +13,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -22,8 +23,6 @@ from agents import build_plugins
 from agents.plugin_manager import PluginManager
 from agents.research import ResearchService
 from ai_engine.engine import EngineCore
-from ai_engine.ollama_client import OllamaClient
-from ai_engine.openrouter_client import OpenRouterClient
 from api import admin, auth, conversations, health, knowledge, memories, onboarding, providers, system, uploads, ws_chat
 from config import Settings, get_settings
 from core.auth import BearerAuthMiddleware
@@ -42,34 +41,9 @@ from services.users import UserService
 logger = get_logger(__name__)
 
 
-def _build_llm(settings: Settings, providers: ProviderService):
-    """The engine always talks to ONE ResilientLLM router. Behind it: Ollama
-    plus every configured cloud provider, walked in priority order with
-    pre-first-token failover (Phase 7). The Phase-5 env OpenRouter switch is
-    preserved as a pinned first candidate when an env key exists."""
-    ollama = OllamaClient(
-        settings.ollama_host,
-        settings.ollama_model,
-        timeout=settings.llm_request_timeout,
-        health_ttl=settings.llm_health_ttl,
-    )
-    pinned = None
-    if settings.llm_provider.lower() == "openrouter" and settings.openrouter_api_key:
-        from ai_engine.cloud_client import OpenAICompatibleClient
-
-        pinned = (
-            "openrouter (env)",
-            OpenAICompatibleClient(
-                settings.openrouter_api_key,
-                settings.openrouter_model,
-                base_url=settings.openrouter_base_url,
-                provider_name="OpenRouter (env)",
-                timeout=settings.llm_request_timeout,
-                health_ttl=settings.llm_health_ttl,
-                static_models=[settings.openrouter_model],
-            ),
-        )
-    return ResilientLLM(ollama, providers, settings, pinned=pinned)
+def _build_llm(settings: Settings, providers: ProviderService) -> ResilientLLM:
+    """Build one capability-aware router over the encrypted provider store."""
+    return ResilientLLM(providers, settings)
 
 
 def _data_dir(settings: Settings) -> Path:
@@ -81,8 +55,7 @@ def _data_dir(settings: Settings) -> Path:
 
 
 def _ensure_sqlite_dir(database_url: str) -> None:
-    """The old config created dirs at import time (audit C1); here it happens
-    explicitly at startup, only where the URL actually points."""
+    """Create local directories explicitly at startup, never at import time."""
     prefix = "sqlite+aiosqlite:///"
     if database_url.startswith(prefix):
         Path(database_url[len(prefix):]).parent.mkdir(parents=True, exist_ok=True)
@@ -101,12 +74,11 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         app.state.settings = settings
         app.state.memory = MemoryService(session_factory)
         app.state.rate_limiter = await build_rate_limiter(settings.redis_url, rate=120, per_seconds=60.0)
-        # dedicated tight bucket for login/register/refresh (brute-force surface)
         app.state.auth_rate_limiter = RateLimiter(rate=10, per_seconds=60.0)
         app.state.files = FileStore(session_factory, settings)
         app.state.knowledge = KnowledgeService(session_factory, fts_enabled=fts_enabled)
 
-        # Phase 7 backbone: machine secret → users/sessions + encrypted keys
+        # Existing auth/session and encrypted provider-key storage remain server-side.
         secret = load_or_create_secret(_data_dir(settings))
         app.state.secret = secret
         app.state.users = UserService(session_factory, secret)
@@ -114,8 +86,6 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         app.state.onboarding = OnboardingService(session_factory)
 
         llm = llm_client or _build_llm(settings, app.state.providers)
-        # Research agent: constructed whenever a SearXNG URL exists; an empty URL
-        # disables internet search cleanly (honest "disabled on this server" reply).
         research = None
         if settings.searxng_url.strip():
             research = ResearchService(
@@ -134,8 +104,8 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         )
         app.state.research = research
         logger.info(
-            "Vednix AI backend ready (model=%s, fts5=%s, db=%s, uploads=%s)",
-            settings.ollama_model, fts_enabled, settings.database_url, settings.upload_dir,
+            "Vednix AI backend ready (providers=Gemini/Groq, fts5=%s, db=%s, uploads=%s)",
+            fts_enabled, settings.database_url, settings.upload_dir,
         )
         try:
             yield
@@ -147,23 +117,23 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             logger.info("Vednix AI backend stopped")
 
     app = FastAPI(title="Vednix AI", version="0.1.0", lifespan=lifespan)
-    # Session gate (Phase 7): open while ZERO accounts exist; locks to JWT
-    # the moment somebody registers. Middle of the stack so CORS preflight
-    # never meets a 401.
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        errors = exc.errors()
+        if request.url.path.startswith("/api/providers/") and request.url.path.endswith("/key"):
+            errors = [{key: value for key, value in error.items() if key != "input"} for error in errors]
+        return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
+
     app.add_middleware(SessionMiddleware)
     if settings.auth_token:
         app.add_middleware(BearerAuthMiddleware, token=settings.auth_token)
-    # compress REST payloads (conversation lists, KB snippets) — WS frames are
-    # per-message already and bypass HTTP middleware entirely
     app.add_middleware(GZipMiddleware, minimum_size=512)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins_list,
-        allow_methods=["*"],
-        allow_headers=["*"],
-        # httpOnly refresh cookie must cross the dev origin boundary
-        # (localhost:3000 → :8000). Explicit origins above are required
-        # for credentials mode (wildcard would be rejected).
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-CSRF-Token", "X-Requested-With"],
         allow_credentials=True,
     )
 
@@ -196,6 +166,4 @@ if __name__ == "__main__":
     import uvicorn
 
     s = get_settings()
-    # Production-grade default: single process, no file watcher. During
-    # development opt into reload explicitly (VEDNIX_DEV_RELOAD=1).
     uvicorn.run("main:app", host=s.host, port=s.port, reload=s.dev_reload)

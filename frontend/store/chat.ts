@@ -7,6 +7,7 @@
 
 import { create } from "zustand";
 import { api, WS_URL, type ConversationSummary, type UploadedFileMeta } from "@/lib/api";
+import { API_BASE_CONFIGURED } from "@/lib/config";
 import { getAccessToken } from "@/lib/tokenVault";
 import { WSClient, type CoreStateName, type Language, type ServerFrame, type WSStatus } from "@/lib/ws";
 import { tts } from "@/lib/tts";
@@ -49,13 +50,15 @@ interface ChatStore {
   activeId: string | null;
   messages: ChatMessage[];
   modelOptions: string[];
+  visionModelOptions: string[];
   activeModel: string | null; // null → conversation/backend default
   temperature: number;
 
   // live connection state
   wsStatus: WSStatus;
   coreState: CoreStateName;
-  ollamaAvailable: boolean;
+  chatAvailable: boolean;
+  providerError: string | null;
   generating: boolean;
 
   // internet research (Phase 5) & multi-agent loop (Phase 6)
@@ -65,6 +68,7 @@ interface ChatStore {
   setMultiAgent: (v: boolean) => void;
   provider: string; // active provider label
   providerChoice: string | null;
+  modelByProvider: Record<string, string>;
   setProvider: (provider: string | null) => void;
 
   // voice (Phase 3)
@@ -106,13 +110,16 @@ interface ChatStore {
   setTemperature: (t: number) => void;
 
   toggleSidebar: () => void;
+  setSidebarOpen: (open: boolean) => void;
   togglePanel: () => void;
+  setPanelOpen: (open: boolean) => void;
 }
 
 let ws: WSClient | null = null;
 let wsToken: string | null = null;
 let streamingId: string | null = null;
 let ttsWired = false;
+let modelRequestSequence = 0;
 
 export const useChat = create<ChatStore>((set, get) => {
   if (!ttsWired && typeof window !== "undefined") {
@@ -222,7 +229,10 @@ export const useChat = create<ChatStore>((set, get) => {
   }
 
   function ensureWs(): WSClient | null {
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined" || !WS_URL) {
+      set({ wsStatus: "closed" });
+      return null;
+    }
     // A WebSocket upgrade cannot carry an Authorization header. The session
     // token is therefore part of the URL, and the socket must be rebuilt when
     // login/refresh changes it. Never retain an anonymous socket after auth.
@@ -232,7 +242,10 @@ export const useChat = create<ChatStore>((set, get) => {
       ws = null;
       wsToken = null;
     }
-    if (ws) return ws;
+    if (ws) {
+      if (!ws.isOpen) ws.connect(); // bounded reconnect; a user retry restarts the attempt
+      return ws;
+    }
     const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
     wsToken = token;
     ws = new WSClient(url, handleFrame, (status) => set({ wsStatus: status }));
@@ -245,12 +258,14 @@ export const useChat = create<ChatStore>((set, get) => {
     activeId: null,
     messages: [],
     modelOptions: [],
+    visionModelOptions: [],
     activeModel: null,
     temperature: 0.7,
 
     wsStatus: "connecting",
     coreState: "IDLE",
-    ollamaAvailable: true,
+    chatAvailable: false,
+    providerError: null,
     generating: false,
 
     voiceState: "idle",
@@ -261,11 +276,43 @@ export const useChat = create<ChatStore>((set, get) => {
     setInternet: (v) => set({ internet: v }),
     multiAgent: false,
     setMultiAgent: (v) => set({ multiAgent: v }),
-    provider: "ollama",
+    provider: "unavailable",
     providerChoice: null,
+    modelByProvider: {},
     setProvider: (provider) => {
-      set({ providerChoice: provider, modelOptions: [], activeModel: null });
-      void api.models(provider).then((r) => set({ modelOptions: r.available.length ? r.available : [r.default], activeModel: r.default })).catch(() => undefined);
+      const requestId = ++modelRequestSequence;
+      const previousKey = get().providerChoice ?? "auto";
+      const currentModel = get().activeModel;
+      const modelByProvider = { ...get().modelByProvider };
+      if (currentModel) modelByProvider[previousKey] = currentModel;
+      set({ providerChoice: provider, modelOptions: [], visionModelOptions: [], providerError: null, modelByProvider });
+      void Promise.all([api.models(provider, "text"), api.models(provider, "vision")]).then(([textResult, visionResult]) => {
+        if (requestId !== modelRequestSequence) return;
+        const matchesProvider = provider === null || textResult.provider === provider;
+        const choices = matchesProvider ? textResult.available ?? [] : [];
+        const saved = modelByProvider[provider ?? "auto"];
+        const selected = saved && choices.includes(saved)
+          ? saved
+          : choices.includes(textResult.default) ? textResult.default : choices[0] ?? null;
+        const visionChoices = matchesProvider && (provider === null || visionResult.provider === provider)
+          ? visionResult.available ?? []
+          : [];
+        if (selected) modelByProvider[provider ?? "auto"] = selected;
+        set({
+          modelOptions: choices,
+          visionModelOptions: visionChoices,
+          activeModel: selected,
+          modelByProvider,
+          providerError: matchesProvider ? textResult.error ?? null
+            : "The backend returned models for a different provider. Select the provider again to refresh.",
+        });
+      }).catch((err) => {
+        if (requestId !== modelRequestSequence) return;
+        set({
+          modelOptions: [], visionModelOptions: [],
+          providerError: err instanceof Error ? err.message : "Could not load validated models.",
+        });
+      });
     },
     setVoiceState: (v) => set({ voiceState: v }),
     setVoiceReplies: (on) => {
@@ -328,27 +375,65 @@ export const useChat = create<ChatStore>((set, get) => {
       set({ draftAttachments: get().draftAttachments.filter((a) => a.id !== id) }),
 
     bootstrap: async () => {
+      // Model discovery may race a quick provider change. Give bootstrap its
+      // own request id so a slow automatic catalog can never overwrite a newer
+      // provider-specific catalog in the model selector.
+      const bootstrapModelRequestId = ++modelRequestSequence;
+      const providerAtBootstrap = get().providerChoice;
       // Do the HTTP/auth bootstrap first. Creating the socket before the
       // access token is available causes a legitimate 4401 handshake and an
       // unnecessary reconnect loop.
       try {
-        const [health, models, conversations] = await Promise.all([
+        const [health, textModels, visionModels, conversations] = await Promise.all([
           api.health(),
-          api.models(),
+          api.models(providerAtBootstrap, "text"),
+          api.models(providerAtBootstrap, "vision"),
           api.listConversations(),
         ]);
-        const options = models.available.length ? models.available : [models.default];
+        const catalogMatchesProvider = providerAtBootstrap === null || textModels.provider === providerAtBootstrap;
+        const options = catalogMatchesProvider ? textModels.available ?? [] : [];
+        const selectionKey = providerAtBootstrap ?? "auto";
+        const savedModel = get().modelByProvider[selectionKey];
+        const selectedModel = savedModel && options.includes(savedModel)
+          ? savedModel
+          : options.includes(textModels.default) ? textModels.default : options[0] ?? null;
+        const modelSelection = bootstrapModelRequestId === modelRequestSequence
+          ? {
+              modelOptions: options,
+              visionModelOptions: catalogMatchesProvider && (providerAtBootstrap === null || visionModels.provider === providerAtBootstrap)
+                ? visionModels.available ?? []
+                : [],
+              activeModel: selectedModel,
+              modelByProvider: selectedModel
+                ? { ...get().modelByProvider, [selectionKey]: selectedModel }
+                : get().modelByProvider,
+              providerError: catalogMatchesProvider
+                ? textModels.error ?? null
+                : "The backend returned models for a different provider. Select the provider again to refresh.",
+            }
+          : {};
         set({
           conversations,
-          modelOptions: options,
-          activeModel: models.default,
-          ollamaAvailable: health.ollama_available,
-          provider: health.provider ?? "ollama",
+          ...modelSelection,
+          chatAvailable: health.chat_available ?? false,
+          provider: health.provider ?? health.active_provider ?? "unavailable",
           loadingConversations: false,
         });
         ensureWs();
-      } catch {
-        set({ loadingConversations: false, ollamaAvailable: false, wsStatus: "closed" });
+      } catch (err) {
+        set({
+          loadingConversations: false,
+          chatAvailable: false,
+          wsStatus: "closed",
+          ...(bootstrapModelRequestId === modelRequestSequence
+            ? {
+                modelOptions: [],
+                visionModelOptions: [],
+                activeModel: null,
+                providerError: err instanceof Error ? err.message : "The Vednix backend is unreachable.",
+              }
+            : {}),
+        });
       }
     },
 
@@ -397,7 +482,9 @@ export const useChat = create<ChatStore>((set, get) => {
             {
               id: `err-${Date.now()}`,
               role: "system",
-              content: "⚠️ Vednix backend is unreachable. Start it (`cd backend && python main.py`) — retrying in the background…",
+              content: API_BASE_CONFIGURED
+                ? "⚠️ The Vednix WebSocket backend is unreachable. Check the Render service and NEXT_PUBLIC_WS_BASE, then retry."
+                : "⚠️ The production backend URL is not configured. Set NEXT_PUBLIC_API_BASE and NEXT_PUBLIC_WS_BASE in Vercel, then redeploy.",
               plugins: [],
               streaming: false,
               error: true,
@@ -406,8 +493,15 @@ export const useChat = create<ChatStore>((set, get) => {
         });
         return;
       }
-      const { activeId, activeModel, temperature, internet, multiAgent, conversations } = get();
+      const { activeId, activeModel, modelOptions, visionModelOptions, temperature, internet, multiAgent, conversations, providerChoice } = get();
       const conv = conversations.find((c) => c.id === activeId);
+      const imageAttached = drafts.some((attachment) => attachment.kind === "image");
+      const allowedModels = imageAttached ? visionModelOptions : modelOptions;
+      const selectedModel = activeModel && allowedModels.includes(activeModel)
+        ? activeModel
+        : !providerChoice && conv?.model && allowedModels.includes(conv.model)
+          ? conv.model
+          : null;
       const prompt =
         text ||
         (drafts.length
@@ -428,7 +522,8 @@ export const useChat = create<ChatStore>((set, get) => {
         type: "user_message",
         content: prompt,
         conversation_id: activeId,
-        model: activeModel ?? conv?.model ?? null,
+        model: selectedModel,
+        provider: providerChoice,
         temperature,
         attachments: drafts.map((d) => d.id),
         internet,
@@ -475,11 +570,16 @@ export const useChat = create<ChatStore>((set, get) => {
       }
     },
 
-    setModel: (model) => set({ activeModel: model }),
+    setModel: (model) => {
+      const key = get().providerChoice ?? "auto";
+      set({ activeModel: model, modelByProvider: { ...get().modelByProvider, ...(model ? { [key]: model } : {}) } });
+    },
     setTemperature: (t) => set({ temperature: t }),
 
     toggleSidebar: () => set({ sidebarOpen: !get().sidebarOpen }),
+    setSidebarOpen: (open) => set({ sidebarOpen: open }),
     togglePanel: () => set({ panelOpen: !get().panelOpen }),
+    setPanelOpen: (open) => set({ panelOpen: open }),
   };
 });
 

@@ -1,319 +1,411 @@
-"""Cloud LLM clients — drop-in implementations of the engine's LLMClient
-Protocol (the same contract OllamaClient has honored since the rewrite):
+"""Server-side adapters for Gemini and Groq.
 
-    model · is_available() · chat() · chat_stream() · list_models_cached() · aclose()
-
-Two wire shapes cover the whole provider registry:
-  * OpenAI-compatible  — /chat/completions + SSE (OpenRouter, Gemini, Groq,
-    OpenAI, Mistral, Together, Fireworks, and any custom/compatible endpoint
-    like LM Studio or vLLM).
-  * Anthropic          — /v1/messages with its own event stream.
-
-Error honesty: every transport/API failure raises CloudProviderError, which
-IS-A OllamaError — the engine's single `except OllamaError` path therefore
-keeps working verbatim ("reply hit an error and was not saved"), no matter
-which provider was active.
+Both providers use OpenAI-compatible chat completions for generation. Gemini's
+catalog is fetched from Google's official REST models.list API; Groq's catalog
+comes from its official /models endpoint. Catalog entries are only candidates:
+ProviderService performs real, low-token capability probes before exposing a
+model as usable.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any, AsyncIterator
 
 import httpx
 
-from ai_engine.ollama_client import OllamaError
+from ai_engine.model_catalog import ModelCapabilities, ModelInfo, normalize_gemini_model
+from ai_engine.provider_error import ProviderError
 from core.logging import get_logger
 
 logger = get_logger(__name__)
 
+_SECRET_PATTERNS = (
+    re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
+    re.compile(r"gsk_[0-9A-Za-z_-]{16,}"),
+    re.compile(r"(?:sk|rk)-[0-9A-Za-z_-]{16,}"),
+)
 
-class CloudProviderError(OllamaError):
-    """Provider-flavored OllamaError (engine catch path stays unchanged)."""
+# A tiny, fixed, harmless test image used only for a real multimodal capability
+# request. This is input data; no model response is fabricated or cached as a
+# successful answer.
+_CAPABILITY_TEST_PNG = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
 
 
-def _sse_lines() -> str:
-    return "event-stream"
+def _redact(value: object, api_key: str) -> str:
+    text = str(value or "")
+    if api_key:
+        text = text.replace(api_key, "[redacted]")
+    for pattern in _SECRET_PATTERNS:
+        text = pattern.sub("[redacted]", text)
+    return " ".join(text.split())[:300]
 
 
-class _BaseCloudClient:
-    """Shared mechanics: owned httpx client, model cache, vision passthrough."""
+def _provider_error(provider: str, response: httpx.Response, api_key: str, model: str | None = None) -> ProviderError:
+    status = response.status_code
+    detail = ""
+    try:
+        body = response.json()
+        error = body.get("error", body) if isinstance(body, dict) else body
+        detail = _redact(error.get("message", "") if isinstance(error, dict) else error, api_key)
+    except (ValueError, AttributeError):
+        detail = ""
+    return ProviderError.from_http(provider, status, detail, model_id=model)
 
-    kind = "base"
+
+def _text_from_content(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            str(part.get("text", ""))
+            for part in content
+            if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
+        )
+    return ""
+
+
+class OpenAICompatibleClient:
+    """Common chat-completions transport for provider-specific adapters."""
 
     def __init__(
         self,
         api_key: str,
         model: str,
         *,
-        base_url: str,
+        provider: str,
         provider_name: str,
-        timeout: float = 300.0,
-        health_ttl: float = 10.0,
-        static_models: list[str] | None = None,
-        vision: bool = False,
-        default_headers: dict[str, str] | None = None,
+        base_url: str,
+        timeout: float = 90.0,
+        client: httpx.AsyncClient | None = None,
+        extra_headers: dict[str, str] | None = None,
     ) -> None:
-        self.api_key = api_key
+        self.provider = provider
+        self.provider_name = provider_name
+        self._api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
-        self.provider_name = provider_name
-        self._timeout = timeout
-        self._health_ttl = health_ttl
-        self._static_models = list(static_models or [])
-        self._vision = vision
-        self._client = httpx.AsyncClient(
+        headers = {"Authorization": f"Bearer {api_key}", **(extra_headers or {})}
+        self._client = client or httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(timeout, connect=8.0),
-            headers=default_headers or {},
+            headers=headers,
         )
-        self._healthy_until = 0.0
-        self._healthy = False
+        self._owns_client = client is None
 
     async def aclose(self) -> None:
-        await self._client.aclose()
-
-    def supports_images(self, model: str | None = None) -> bool:
-        return self._vision
-
-    # --- health / models -----------------------------------------------------
-
-    async def _models_request(self) -> httpx.Response:
-        raise NotImplementedError
-
-    async def is_available(self) -> bool:
-        if time.monotonic() < self._healthy_until:
-            return self._healthy
-        try:
-            resp = await self._models_request()
-            self._healthy = resp.status_code < 500  # 401 still means "reachable"
-        except httpx.HTTPError:
-            self._healthy = False
-        self._healthy_until = time.monotonic() + self._health_ttl
-        return self._healthy
-
-    async def list_models(self) -> list[str]:
-        try:
-            resp = await self._models_request()
-            if resp.status_code in (401, 403):
-                raise CloudProviderError(f"{self.provider_name}: API key rejected (401/403).")
-            resp.raise_for_status()
-            return self._parse_models(resp.json())
-        except CloudProviderError:
-            raise
-        except (httpx.HTTPError, ValueError) as exc:
-            raise CloudProviderError(f"Could not reach {self.provider_name}: {exc}") from exc
-
-    def _parse_models(self, data: Any) -> list[str]:
-        return []
-
-    async def list_models_cached(self, ttl: float = 120.0) -> list[str]:
-        now = time.monotonic()
-        if now < getattr(self, "_models_until", 0.0):
-            return getattr(self, "_models_cache", self._static_models)
-        try:
-            models = await self.list_models()
-        except CloudProviderError:
-            models = []
-        if not models:
-            models = self._static_models  # key pending/quota/limited listing — defaults still work
-        self._models_cache = models
-        self._models_until = now + ttl
-        return models
-
-
-class OpenAICompatibleClient(_BaseCloudClient):
-    """OpenAI / OpenRouter / Gemini(OpenAI-mode) / Groq / Mistral / Together /
-    Fireworks / custom compatible endpoints."""
-
-    kind = "openai"
-
-    def __init__(self, api_key: str, model: str, **kw: Any) -> None:
-        super().__init__(api_key, model, **kw)
-        self._client.headers["Authorization"] = f"Bearer {api_key}"
-        # OpenRouter ranking headers are harmless elsewhere
-        self._client.headers["X-Title"] = "Vednix AI"
+        if self._owns_client:
+            await self._client.aclose()
 
     async def _models_request(self) -> httpx.Response:
         return await self._client.get("/models")
 
-    def _parse_models(self, data: Any) -> list[str]:
-        items = data.get("data", []) if isinstance(data, dict) else []
-        return sorted(i.get("id", "") for i in items if i.get("id"))
+    def _parse_model_entries(self, payload: Any) -> list[ModelInfo]:
+        items = payload.get("data", []) if isinstance(payload, dict) else []
+        models: list[ModelInfo] = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            active = item.get("active", True) is not False
+            model_id = str(item["id"]).strip()
+            reason = None if active else "The provider reports this model as inactive."
+            models.append(ModelInfo(
+                id=model_id,
+                provider=self.provider,
+                displayName=str(item.get("name") or item.get("display_name") or model_id),
+                capabilities=ModelCapabilities(text=active),
+                contextWindow=_positive_int(item.get("context_window")),
+                maxOutputTokens=_positive_int(item.get("max_completion_tokens")),
+                available=False,
+                reason=reason or "Awaiting a text-generation capability check.",
+                checkedCapabilities=(),
+            ))
+        return models
 
-    # --- payloads ------------------------------------------------------------
+    async def discover_models(self) -> list[ModelInfo]:
+        try:
+            response = await self._models_request()
+            if not 200 <= response.status_code < 300:
+                raise _provider_error(self.provider_name, response, self._api_key)
+            return self._parse_model_entries(response.json())
+        except ProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            reason = _redact(exc, self._api_key) or "network error"
+            raise ProviderError(
+                self.provider_name, f"Could not retrieve the live model catalog: {reason}.",
+                category="temporary", retryable=True,
+            ) from exc
+        except ValueError as exc:
+            raise ProviderError(self.provider_name, "The provider returned invalid model catalog data.") from exc
 
-    def _payload(self, messages: list[dict], temperature: float, model: str | None,
-                 stream: bool, images: list[str] | None) -> dict[str, Any]:
-        if images and self._vision:
-            messages = [dict(m) for m in messages]
-            for i in range(len(messages) - 1, -1, -1):
-                if messages[i].get("role") == "user":
-                    text = messages[i].get("content", "")
-                    messages[i]["content"] = [
-                        {"type": "text", "text": text},
-                        *({"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}
-                          for b64 in images),
-                    ]
+    def _payload(
+        self,
+        messages: list[dict],
+        temperature: float,
+        model: str,
+        *,
+        stream: bool,
+        images: list[str] | None = None,
+        max_tokens: int | None = None,
+    ) -> dict[str, Any]:
+        prepared = [dict(message) for message in messages]
+        if images:
+            for index in range(len(prepared) - 1, -1, -1):
+                if prepared[index].get("role") == "user":
+                    text = prepared[index].get("content", "")
+                    if isinstance(text, list):
+                        parts = list(text)
+                    else:
+                        parts = [{"type": "text", "text": str(text)}]
+                    parts.extend(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{image}"},
+                        }
+                        for image in images[:3]
+                    )
+                    prepared[index]["content"] = parts
                     break
-        return {
-            "model": model or self.model,
-            "messages": messages,
+        payload: dict[str, Any] = {
+            "model": model,
+            "messages": prepared,
             "temperature": temperature,
             "stream": stream,
         }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        return payload
 
-    async def chat(self, messages: list[dict], temperature: float, *,
-                   model: str | None = None, images: list[str] | None = None) -> str:
+    async def chat(
+        self,
+        messages: list[dict],
+        temperature: float,
+        *,
+        model: str | None = None,
+        images: list[str] | None = None,
+        max_tokens: int | None = None,
+    ) -> str:
+        selected = model or self.model
         try:
-            resp = await self._client.post(
+            response = await self._client.post(
                 "/chat/completions",
-                json=self._payload(messages, temperature, model, False, images),
+                json=self._payload(
+                    messages, temperature, selected, stream=False, images=images,
+                    max_tokens=max_tokens,
+                ),
             )
-            if resp.status_code in (401, 403):
-                raise CloudProviderError(f"{self.provider_name}: API key rejected.")
-            resp.raise_for_status()
-            data = resp.json()
-        except CloudProviderError:
+            if not 200 <= response.status_code < 300:
+                raise _provider_error(self.provider_name, response, self._api_key, selected)
+            payload = response.json()
+        except ProviderError:
             raise
         except httpx.HTTPError as exc:
-            raise CloudProviderError(f"Could not reach {self.provider_name}: {exc}") from exc
+            reason = _redact(exc, self._api_key) or "network error"
+            raise ProviderError(
+                self.provider_name, f"Could not reach the provider: {reason}.",
+                category="temporary", retryable=True, model_id=selected,
+            ) from exc
         except ValueError as exc:
-            raise CloudProviderError(f"{self.provider_name} returned invalid JSON: {exc}") from exc
-        if err := (data.get("error") or {}):
-            if isinstance(err, dict) and err.get("message"):
-                raise CloudProviderError(str(err["message"]))
-        return (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            raise ProviderError(self.provider_name, "The provider returned invalid chat data.", model_id=selected) from exc
 
-    async def chat_stream(self, messages: list[dict], temperature: float, *,
-                          model: str | None = None, images: list[str] | None = None) -> AsyncIterator[str]:
+        if error := payload.get("error"):
+            detail = _redact(error.get("message", "") if isinstance(error, dict) else error, self._api_key)
+            raise ProviderError(self.provider_name, detail or "The provider rejected this request.", model_id=selected)
+        choices = payload.get("choices") or []
+        message = choices[0].get("message") if choices and isinstance(choices[0], dict) else None
+        text = _text_from_content((message or {}).get("content"))
+        if not text.strip():
+            raise ProviderError(self.provider_name, "The provider returned no text response.", model_id=selected)
+        return text
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        temperature: float,
+        *,
+        model: str | None = None,
+        images: list[str] | None = None,
+    ) -> AsyncIterator[str]:
+        selected = model or self.model
         try:
             async with self._client.stream(
                 "POST", "/chat/completions",
-                json=self._payload(messages, temperature, model, True, images),
-            ) as resp:
-                if resp.status_code in (401, 403):
-                    raise CloudProviderError(f"{self.provider_name}: API key rejected.")
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
+                json=self._payload(messages, temperature, selected, stream=True, images=images),
+            ) as response:
+                if not 200 <= response.status_code < 300:
+                    body = (await response.aread()).decode("utf-8", "replace")
+                    error_response = httpx.Response(
+                        response.status_code, content=body, headers=dict(response.headers),
+                        request=response.request,
+                    )
+                    raise _provider_error(self.provider_name, error_response, self._api_key, selected)
+                async for line in response.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
                         return
                     try:
-                        chunk = json.loads(data)
+                        event = json.loads(data)
                     except json.JSONDecodeError:
                         continue
-                    if err := chunk.get("error"):
-                        raise CloudProviderError(str(err.get("message", err)))
-                    delta = (chunk.get("choices") or [{}])[0].get("delta", {})
-                    content = delta.get("content")
-                    if content:
-                        yield content
-        except CloudProviderError:
+                    if error := event.get("error"):
+                        detail = _redact(error.get("message", "") if isinstance(error, dict) else error, self._api_key)
+                        raise ProviderError(self.provider_name, detail or "The provider rejected this request.", model_id=selected)
+                    choices = event.get("choices") or []
+                    if not choices or not isinstance(choices[0], dict):
+                        continue
+                    delta = choices[0].get("delta") or {}
+                    text = _text_from_content(delta.get("content"))
+                    if text:
+                        yield text
+        except ProviderError:
             raise
         except httpx.HTTPError as exc:
-            raise CloudProviderError(f"Could not reach {self.provider_name}: {exc}") from exc
+            reason = _redact(exc, self._api_key) or "network error"
+            raise ProviderError(
+                self.provider_name, f"Streaming request failed: {reason}.",
+                category="temporary", retryable=True, model_id=selected,
+            ) from exc
 
+    async def probe_text(self, model_id: str) -> float:
+        start = time.perf_counter()
+        await self.chat(
+            [{"role": "user", "content": "Reply with the single character 1."}],
+            0.0, model=model_id, max_tokens=1,
+        )
+        return (time.perf_counter() - start) * 1000
 
-class AnthropicClient(_BaseCloudClient):
-    """Claude via /v1/messages (its own SSE shape: content_block_delta events)."""
+    async def probe_vision(self, model_id: str) -> None:
+        await self.chat(
+            [{"role": "user", "content": "Look at this image. Reply with the single character 1."}],
+            0.0, model=model_id, images=[_CAPABILITY_TEST_PNG], max_tokens=1,
+        )
 
-    kind = "anthropic"
-
-    def __init__(self, api_key: str, model: str, **kw: Any) -> None:
-        super().__init__(api_key, model, **kw)
-        self._client.headers["x-api-key"] = api_key
-        self._client.headers["anthropic-version"] = "2023-06-01"
-
-    async def _models_request(self) -> httpx.Response:
-        return await self._client.get("/v1/models")
-
-    def _parse_models(self, data: Any) -> list[str]:
-        items = data.get("data", []) if isinstance(data, dict) else []
-        return sorted(i.get("id", "") for i in items if i.get("id"))
-
-    def _payload(self, messages: list[dict], temperature: float, model: str | None,
-                 stream: bool, images: list[str] | None) -> dict[str, Any]:
-        system = ""
-        rest: list[dict] = []
-        for m in messages:
-            if m.get("role") == "system":
-                system = (system + "\n\n" + m.get("content", "")).strip()
-            else:
-                rest.append(dict(m))
-        if images and self._vision:
-            for i in range(len(rest) - 1, -1, -1):
-                if rest[i].get("role") == "user":
-                    text = rest[i].get("content", "")
-                    rest[i]["content"] = [
-                        *({"type": "image",
-                            "source": {"type": "base64", "media_type": "image/png", "data": b64}}
-                          for b64 in images),
-                        {"type": "text", "text": text},
-                    ]
-                    break
-        payload: dict[str, Any] = {
-            "model": model or self.model,
-            "messages": rest,
-            "max_tokens": 4096,
-            "temperature": temperature,
-            "stream": stream,
+    async def probe_tools(self, model_id: str) -> None:
+        """Validate the provider/model tool schema without executing a tool."""
+        selected = model_id
+        payload = {
+            "model": selected,
+            "messages": [{"role": "user", "content": "Use the ping tool."}],
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "ping",
+                    "description": "A capability check; never executed.",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }],
+            "tool_choice": {"type": "function", "function": {"name": "ping"}},
+            "max_tokens": 1,
+            "temperature": 0,
         }
-        if system:
-            payload["system"] = system
-        return payload
-
-    async def chat(self, messages: list[dict], temperature: float, *,
-                   model: str | None = None, images: list[str] | None = None) -> str:
         try:
-            resp = await self._client.post(
-                "/v1/messages", json=self._payload(messages, temperature, model, False, images)
-            )
-            if resp.status_code in (401, 403):
-                raise CloudProviderError("Anthropic: API key rejected.")
-            resp.raise_for_status()
-            data = resp.json()
-        except CloudProviderError:
+            response = await self._client.post("/chat/completions", json=payload)
+            if not 200 <= response.status_code < 300:
+                raise _provider_error(self.provider_name, response, self._api_key, selected)
+            result = response.json()
+            choices = result.get("choices") or []
+            message = choices[0].get("message", {}) if choices and isinstance(choices[0], dict) else {}
+            if not message.get("tool_calls"):
+                raise ProviderError(
+                    self.provider_name,
+                    "The model accepted the request but did not demonstrate tool calling.",
+                    category="capability", model_id=selected,
+                )
+        except ProviderError:
             raise
         except httpx.HTTPError as exc:
-            raise CloudProviderError(f"Could not reach Anthropic: {exc}") from exc
+            reason = _redact(exc, self._api_key) or "network error"
+            raise ProviderError(
+                self.provider_name, f"Tool capability check failed: {reason}.",
+                category="temporary", retryable=True, model_id=selected,
+            ) from exc
+
+
+class GeminiClient(OpenAICompatibleClient):
+    """Gemini adapter: official REST model metadata + compatible generation."""
+
+    def __init__(self, api_key: str, model: str, *, timeout: float = 90.0,
+                 client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(
+            api_key, model, provider="gemini", provider_name="Google Gemini",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            timeout=timeout, client=client, extra_headers={"x-goog-api-key": api_key},
+        )
+
+    async def discover_models(self) -> list[ModelInfo]:
+        rows: list[dict] = []
+        page_token: str | None = None
+        try:
+            while True:
+                params: dict[str, Any] = {"pageSize": 1000}
+                if page_token:
+                    params["pageToken"] = page_token
+                response = await self._client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params=params,
+                    headers={"x-goog-api-key": self._api_key},
+                )
+                if not 200 <= response.status_code < 300:
+                    raise _provider_error(self.provider_name, response, self._api_key)
+                payload = response.json()
+                rows.extend(payload.get("models", []))
+                page_token = payload.get("nextPageToken")
+                if not page_token:
+                    break
+        except ProviderError:
+            raise
+        except httpx.HTTPError as exc:
+            reason = _redact(exc, self._api_key) or "network error"
+            raise ProviderError(
+                self.provider_name, f"Could not retrieve Google's live model catalog: {reason}.",
+                category="temporary", retryable=True,
+            ) from exc
         except ValueError as exc:
-            raise CloudProviderError(f"Anthropic returned invalid JSON: {exc}") from exc
-        if data.get("type") == "error":
-            raise CloudProviderError(str(data.get("error", {}).get("message", "Anthropic error")))
-        blocks = data.get("content") or []
-        return "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
+            raise ProviderError(self.provider_name, "Google returned invalid model catalog data.") from exc
 
-    async def chat_stream(self, messages: list[dict], temperature: float, *,
-                          model: str | None = None, images: list[str] | None = None) -> AsyncIterator[str]:
-        try:
-            async with self._client.stream(
-                "POST", "/v1/messages",
-                json=self._payload(messages, temperature, model, True, images),
-            ) as resp:
-                if resp.status_code in (401, 403):
-                    raise CloudProviderError("Anthropic: API key rejected.")
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    try:
-                        chunk = json.loads(line[5:].strip())
-                    except json.JSONDecodeError:
-                        continue
-                    ctype = chunk.get("type")
-                    if ctype == "content_block_delta":
-                        text = chunk.get("delta", {}).get("text")
-                        if text:
-                            yield text
-                    elif ctype == "message_stop":
-                        return
-                    elif ctype == "error":
-                        raise CloudProviderError(str(chunk.get("error", {}).get("message", "Anthropic error")))
-        except CloudProviderError:
-            raise
-        except httpx.HTTPError as exc:
-            raise CloudProviderError(f"Could not reach Anthropic: {exc}") from exc
+        models: list[ModelInfo] = []
+        for raw in rows:
+            if not isinstance(raw, dict) or not raw.get("name"):
+                continue
+            model_id = normalize_gemini_model(str(raw.get("baseModelId") or raw["name"]))
+            methods = {str(method).lower() for method in raw.get("supportedGenerationMethods", [])}
+            supports_text = "generatecontent" in methods
+            reason = None if supports_text else "Google does not list generateContent support for this model."
+            models.append(ModelInfo(
+                id=model_id,
+                provider="gemini",
+                displayName=str(raw.get("displayName") or model_id),
+                capabilities=ModelCapabilities(text=supports_text),
+                contextWindow=_positive_int(raw.get("inputTokenLimit")),
+                maxOutputTokens=_positive_int(raw.get("outputTokenLimit")),
+                available=False,
+                reason=reason or "Awaiting a text-generation capability check.",
+                checkedCapabilities=("text_metadata",) if supports_text else (),
+            ))
+        return models
+
+
+class GroqClient(OpenAICompatibleClient):
+    """Groq adapter using its live OpenAI-compatible models and chat APIs."""
+
+    def __init__(self, api_key: str, model: str = "", *, timeout: float = 90.0,
+                 client: httpx.AsyncClient | None = None) -> None:
+        super().__init__(
+            api_key, model, provider="groq", provider_name="Groq",
+            base_url="https://api.groq.com/openai/v1", timeout=timeout, client=client,
+        )
+
+
+def _positive_int(value: object) -> int | None:
+    try:
+        result = int(value)  # type: ignore[arg-type]
+        return result if result > 0 else None
+    except (TypeError, ValueError):
+        return None

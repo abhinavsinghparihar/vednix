@@ -38,12 +38,12 @@ def read_until(ws, frame_type: str, max_frames: int = 80) -> list[dict]:
 def test_health_and_models(factory):
     with factory() as client:
         health = client.get("/api/health").json()
-        assert health["status"] == "ok" and health["ollama_available"] is True
+        assert health["status"] == "ok" and health["backend_online"] is True
         # brand signature: primary brand + creator, both configurable
         assert health["assistant"] == "Vednix AI"
         assert health["creator"] == "Abhinav Singh"
         models = client.get("/api/models").json()
-        assert "fake-model" in models["available"]
+        assert models["available"] == []  # no provider key configured in this test
 
 
 def test_conversation_rest_crud(factory):
