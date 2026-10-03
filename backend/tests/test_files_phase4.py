@@ -45,6 +45,22 @@ async def test_file_store_validation(files_store):
         await files_store.save("evil.exe", "application/octet-stream", b"MZ..")
     with pytest.raises(ValueError, match="empty"):
         await files_store.save("zero.txt", "text/plain", b"")
+    with pytest.raises(ValueError, match="valid image"):
+        await files_store.save("spoof.png", "image/png", PNG_BYTES[:20])
+    with pytest.raises(ValueError, match="Office Open XML"):
+        await files_store.save("spoof.docx", "application/octet-stream", b"not a zip")
+
+
+async def test_valid_office_document_passes_bounded_archive_checks(files_store):
+    from io import BytesIO
+    from docx import Document
+
+    buffer = BytesIO()
+    document = Document()
+    document.add_paragraph("The document pipeline is verified.")
+    document.save(buffer)
+    row = await files_store.save("brief.docx", "application/octet-stream", buffer.getvalue())
+    assert "document pipeline is verified" in (await files_store.read_text(row.id) or "")
 
 
 async def test_image_stored_without_extraction(files_store):
@@ -54,7 +70,50 @@ async def test_image_stored_without_extraction(files_store):
     assert base64.b64decode(b64) == PNG_BYTES
 
 
+async def test_vision_payload_is_a_bounded_normalized_jpeg(files_store):
+    from io import BytesIO
+    from PIL import Image
+
+    row = await files_store.save("dot.png", "image/png", PNG_BYTES)
+    data_url = await files_store.read_image_data_url(row.id)
+    assert data_url and data_url.startswith("data:image/jpeg;base64,")
+    encoded = base64.b64decode(data_url.split(",", 1)[1])
+    image = Image.open(BytesIO(encoded))
+    assert image.format == "JPEG" and image.size == (1, 1)
+
+
 # --- chat-with-file (engine enrichment) ---------------------------------------
+
+async def test_document_attachment_uses_verified_document_input_route(core, memory, files_store):
+    row = await files_store.save("brief.txt", "text/plain", b"The launch date is Friday.")
+
+    class TaskAwareLLM(FakeLLM):
+        def __init__(self):
+            super().__init__()
+            self.checked_tasks = []
+            self.stream_tasks = []
+
+        async def is_available(self, provider=None, *, task="text"):
+            self.checked_tasks.append(task)
+            return True
+
+        async def chat_stream(self, messages, temperature, *, model=None, images=None, provider=None, task="text"):
+            self.stream_tasks.append(task)
+            async for chunk in super().chat_stream(messages, temperature, model=model, images=images, provider=provider):
+                yield chunk
+
+    llm = TaskAwareLLM()
+    conv = await memory.create_conversation()
+    session = core(llm, files=files_store).create_session(memory, conv.id)
+    await collect(session.stream_reply(
+        "When is launch?",
+        attachments=[AttachmentRef(id=row.id, name=row.name, kind=row.kind, size=row.size)],
+    ))
+
+    assert llm.checked_tasks == ["document_input"]
+    assert llm.stream_tasks == ["document_input"]
+    assert "The launch date is Friday." in llm.calls[0][-1]["content"]
+
 
 async def test_chat_includes_file_context(core, memory, files_store, settings):
     row = await files_store.save("plan.txt", "text/plain", "The secret code is GARUDA-77.".encode())
@@ -99,7 +158,7 @@ async def test_vision_guard_without_vision_model(core, memory, files_store):
         provider="gemini",
     ))
 
-    assert "successful vision capability check" in reply
+    assert "successful image-input check" in reply
     assert llm.calls == []  # never called with a guess
     history = await memory.recent_history(conv.id, max_turns=5)
     assert [m["role"] for m in history] == ["user"]  # guidance never persisted (audit B2)

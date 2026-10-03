@@ -1,8 +1,6 @@
 /**
- * The Rail — Vednix's OS dock. A floating liquid-glass vertical strip that
- * switches between the workspace's surfaces: Home hub, Chat, Knowledge,
- * Memory. Bottom carries the theme toggle and the creator's signature in
- * vertical micro-type. Hidden on small screens (chat stays the mobile hero).
+ * The Rail — Vednix's OS dock. A floating liquid-glass strip switches
+ * workspace surfaces; on phones it becomes a safe-area-aware bottom nav.
  */
 
 "use client";
@@ -28,10 +26,13 @@ export function Rail() {
   return (
     <nav
       aria-label="Workspace views"
-      className="glass-liquid z-30 m-3 ml-3 mr-0 hidden w-[62px] shrink-0 flex-col items-center gap-2 rounded-3xl py-4 md:flex"
+      className="glass-liquid z-30 m-3 ml-3 mr-0 hidden w-[62px] shrink-0 flex-col items-center gap-2 rounded-3xl py-4 md:flex
+                 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:m-0 max-md:flex max-md:h-[calc(3.75rem+env(safe-area-inset-bottom))]
+                 max-md:w-full max-md:flex-row max-md:justify-around max-md:gap-0 max-md:rounded-none max-md:rounded-t-2xl
+                 max-md:px-1 max-md:pb-[env(safe-area-inset-bottom)] max-md:pt-1 max-md:shadow-[0_-12px_36px_rgba(0,0,0,0.45)]"
     >
       {/* the neural V — animated, always */}
-      <LogoMark size={38} className="mb-2" />
+      <LogoMark size={38} className="mb-2 max-md:hidden" />
 
       {ITEMS.map((it) => {
         const active = view === it.view;
@@ -54,8 +55,8 @@ export function Rail() {
         );
       })}
 
-      <div className="mt-auto flex flex-col items-center gap-3">
-        <span className="h-px w-7 bg-white/[0.08]" />
+      <div className="mt-auto flex flex-col items-center gap-3 max-md:mt-0 max-md:flex-row max-md:gap-1">
+        <span className="h-px w-7 bg-white/[0.08] max-md:h-7 max-md:w-px" />
         <Link
           href="/settings"
           aria-label="Settings"
@@ -73,10 +74,6 @@ export function Rail() {
           <UserRound className="h-[17px] w-[17px]" />
         </Link>
         <ThemeToggle />
-        <span
-          className="font-mono text-[8px] uppercase tracking-[0.26em] [writing-mode:vertical-rl]"
-        >
-        </span>
       </div>
     </nav>
   );

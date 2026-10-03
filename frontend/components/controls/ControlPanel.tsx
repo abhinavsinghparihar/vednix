@@ -19,6 +19,8 @@ import { useChat } from "@/store/chat";
 import { providerApi, type ProviderConfig } from "@/lib/authApi";
 import type { Language } from "@/lib/ws";
 import { tts } from "@/lib/tts";
+import { CreatorLinks } from "@/components/brand/CreatorLinks";
+import { Signature } from "@/components/brand/Signature";
 import { Button, GlassPanel, Segmented, Slider, Switch } from "@/components/ui/primitives";
 
 const LANG_OPTIONS: { value: Language; label: string }[] = [
@@ -296,6 +298,8 @@ export function ControlPanel() {
               <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-faint">
                 multi-provider workspace · v0.1
               </span>
+              <Signature />
+              <CreatorLinks />
             </div>
             </div>
           </motion.aside>

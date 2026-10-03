@@ -13,7 +13,7 @@ export type ServerFrame =
   | { type: "state_changed"; state: CoreStateName }
   | { type: "message_started"; message_id: string; conversation_id: string }
   | { type: "token"; message_id: string; content: string }
-  | { type: "message_done"; message_id: string; conversation_id: string; plugins: string[]; kb_sources?: string[]; sources?: { title: string; url: string }[]; steps?: { step: string; detail: string }[]; cancelled: boolean }
+  | { type: "message_done"; message_id: string; conversation_id: string; plugins: string[]; kb_sources?: string[]; sources?: { title: string; url: string }[]; steps?: { step: string; detail: string }[]; error?: { code: string; message: string } | null; cancelled: boolean }
   | { type: "agent_step"; step: string; detail: string }
   | { type: "conversation_created"; conversation_id: string; title: string }
   | { type: "title_updated"; conversation_id: string; title: string }

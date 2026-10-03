@@ -58,12 +58,19 @@ export interface ProviderModelInfo {
   displayName: string;
   capabilities: {
     text: boolean;
+    chat: boolean;
+    streaming: boolean;
     vision: boolean;
+    imageInput: boolean;
+    documentInput: boolean;
+    tools: boolean;
+    toolCalling: boolean;
+    structuredOutput: boolean;
+    reasoning: boolean;
     audioInput: boolean;
     audioOutput: boolean;
     imageGeneration: boolean;
     video: boolean;
-    tools: boolean;
   };
   contextWindow: number | null;
   maxOutputTokens: number | null;

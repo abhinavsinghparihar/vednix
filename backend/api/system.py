@@ -13,6 +13,18 @@ from services.providers import REGISTRY
 router = APIRouter(tags=["system"])
 
 
+@router.get("/system/identity")
+async def creator_identity(core=Depends(get_core)) -> dict:
+    """Public creator facts sourced from server configuration, never memory."""
+    settings = core.settings
+    return {
+        "product": settings.assistant_name,
+        "creator": settings.creator_name,
+        "github_username": settings.creator_github_username,
+        "linkedin_url": settings.creator_linkedin_url or None,
+    }
+
+
 def _dir_size(path: Path) -> int:
     total = 0
     try:
@@ -27,6 +39,19 @@ def _dir_size(path: Path) -> int:
 def _db_path(database_url: str) -> Path | None:
     prefix = "sqlite+aiosqlite:///"
     return Path(database_url[len(prefix):]) if database_url.startswith(prefix) else None
+
+
+@router.get("/research/status")
+async def research_status(core=Depends(get_core)) -> dict:
+    """Live check for the configured search backend; no LLM/model calls."""
+    research = core.research
+    if research is None:
+        return {"available": False, "detail": "Search is not configured on this server."}
+    available = await research.check_available()
+    return {
+        "available": available,
+        "detail": "" if available else "The search service is not reachable or returned no results.",
+    }
 
 
 @router.get("/system/status")

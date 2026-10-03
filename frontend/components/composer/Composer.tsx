@@ -1,7 +1,6 @@
 /**
  * Glass composer: auto-growing textarea, Enter-to-send, char counter,
- * send/stop morph. Attach + mic sit disabled with phase badges — they are
- * honest roadmap placeholders (Phase 3/4), not fake buttons.
+ * real bounded file attachments, browser dictation, and send/stop controls.
  */
 
 "use client";
@@ -143,7 +142,7 @@ export function Composer() {
               {uploadingCount > 0 ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
             </Button>
             <Badge className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap opacity-0 transition-opacity group-hover:opacity-100">
-              PDF · DOCX · XLSX · PPTX · CSV · images
+              PDF · DOCX · XLSX · PPTX · CSV · images (up to 3)
             </Badge>
           </div>
 

@@ -42,6 +42,13 @@ def test_health_and_models(factory):
         # brand signature: primary brand + creator, both configurable
         assert health["assistant"] == "Vednix AI"
         assert health["creator"] == "Abhinav Singh"
+        identity = client.get("/api/system/identity").json()
+        assert identity == {
+            "product": "Vednix AI",
+            "creator": "Abhinav Singh",
+            "github_username": "abhinavsinghparihar",
+            "linkedin_url": None,
+        }
         models = client.get("/api/models").json()
         assert models["available"] == []  # no provider key configured in this test
 

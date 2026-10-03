@@ -28,11 +28,10 @@ _SECRET_PATTERNS = (
     re.compile(r"(?:sk|rk)-[0-9A-Za-z_-]{16,}"),
 )
 
-# A tiny, fixed, harmless test image used only for a real multimodal capability
-# request. This is input data; no model response is fabricated or cached as a
-# successful answer.
-_CAPABILITY_TEST_PNG = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+# A tiny, fixed, harmless JPEG used to prove the normalized format that
+# Vednix actually sends for every supported image extension.
+_CAPABILITY_TEST_JPEG = (
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAUDBAQEAwUEBAQFBQUGBwwIBwcHBw8LCwkMEQ8SEhEPERETFhwXExQaFRERGCEYGh0dHx8fExciJCIeJBweHx7/2wBDAQUFBQcGBw4ICA4eFBEUHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh7/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAAP/EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/ALLAB//Z"
 )
 
 
@@ -67,6 +66,26 @@ def _text_from_content(content: object) -> str:
             if isinstance(part, dict) and part.get("type") in {"text", "output_text"}
         )
     return ""
+
+
+_NON_CHAT_MODEL = re.compile(
+    r"(?:^|[-_/])(prompt[-_]?guard|whisper|distil[-_]?whisper|speech|tts|audio|"
+    r"embedding|embed|moderation|classifier|classification|rerank(?:er)?|"
+    r"reward|safeguard|safety[-_]?classifier|transcri(?:be|ption)|image[-_]?generation)(?:$|[-_/])",
+    re.IGNORECASE,
+)
+
+
+def _non_chat_reason(model_id: str, item: dict[str, Any]) -> str | None:
+    """Conservative metadata/name exclusion before a real chat/stream probe."""
+    state = str(item.get("state") or item.get("status") or "").lower()
+    if item.get("active", True) is False or item.get("deprecated") is True or item.get("retired") is True:
+        return "The provider reports this model as inactive or deprecated."
+    if state in {"inactive", "deprecated", "retired", "disabled", "deleted"}:
+        return "The provider reports this model as inactive or deprecated."
+    if _NON_CHAT_MODEL.search(model_id.lower()):
+        return "This is a specialized non-chat model (for example, audio, embeddings, moderation, or classification)."
+    return None
 
 
 class OpenAICompatibleClient:
@@ -110,18 +129,18 @@ class OpenAICompatibleClient:
         for item in items:
             if not isinstance(item, dict) or not item.get("id"):
                 continue
-            active = item.get("active", True) is not False
             model_id = str(item["id"]).strip()
-            reason = None if active else "The provider reports this model as inactive."
+            reason = _non_chat_reason(model_id, item)
+            supports_chat = reason is None
             models.append(ModelInfo(
                 id=model_id,
                 provider=self.provider,
                 displayName=str(item.get("name") or item.get("display_name") or model_id),
-                capabilities=ModelCapabilities(text=active),
+                capabilities=ModelCapabilities(text=supports_chat),
                 contextWindow=_positive_int(item.get("context_window")),
                 maxOutputTokens=_positive_int(item.get("max_completion_tokens")),
                 available=False,
-                reason=reason or "Awaiting a text-generation capability check.",
+                reason=reason or "Awaiting a live chat and streaming capability check.",
                 checkedCapabilities=(),
             ))
         return models
@@ -165,7 +184,10 @@ class OpenAICompatibleClient:
                     parts.extend(
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{image}"},
+                            "image_url": {
+                                "url": image if image.startswith("data:image/")
+                                else f"data:image/png;base64,{image}"
+                            },
                         }
                         for image in images[:3]
                     )
@@ -230,12 +252,16 @@ class OpenAICompatibleClient:
         *,
         model: str | None = None,
         images: list[str] | None = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[str]:
         selected = model or self.model
         try:
             async with self._client.stream(
                 "POST", "/chat/completions",
-                json=self._payload(messages, temperature, selected, stream=True, images=images),
+                json=self._payload(
+                    messages, temperature, selected, stream=True, images=images,
+                    max_tokens=max_tokens,
+                ),
             ) as response:
                 if not 200 <= response.status_code < 300:
                     body = (await response.aread()).decode("utf-8", "replace")
@@ -277,14 +303,30 @@ class OpenAICompatibleClient:
         start = time.perf_counter()
         await self.chat(
             [{"role": "user", "content": "Reply with the single character 1."}],
-            0.0, model=model_id, max_tokens=1,
+            0.0, model=model_id, max_tokens=2,
         )
         return (time.perf_counter() - start) * 1000
 
+    async def probe_stream(self, model_id: str, *, images: list[str] | None = None) -> float:
+        """Prove the exact streaming path used by Vednix returns visible text."""
+        start = time.perf_counter()
+        async for chunk in self.chat_stream(
+            [{"role": "user", "content": "Reply with the single character 1."}],
+            0.0, model=model_id, images=images, max_tokens=2,
+        ):
+            if chunk.strip():
+                return (time.perf_counter() - start) * 1000
+        raise ProviderError(
+            self.provider_name,
+            "The model accepted chat but produced no streamed text response.",
+            category="streaming_unsupported", model_id=model_id,
+        )
+
     async def probe_vision(self, model_id: str) -> None:
+        image = f"data:image/jpeg;base64,{_CAPABILITY_TEST_JPEG}"
         await self.chat(
             [{"role": "user", "content": "Look at this image. Reply with the single character 1."}],
-            0.0, model=model_id, images=[_CAPABILITY_TEST_PNG], max_tokens=1,
+            0.0, model=model_id, images=[image], max_tokens=2,
         )
 
     async def probe_tools(self, model_id: str) -> None:
@@ -376,8 +418,11 @@ class GeminiClient(OpenAICompatibleClient):
                 continue
             model_id = normalize_gemini_model(str(raw.get("baseModelId") or raw["name"]))
             methods = {str(method).lower() for method in raw.get("supportedGenerationMethods", [])}
-            supports_text = "generatecontent" in methods
-            reason = None if supports_text else "Google does not list generateContent support for this model."
+            metadata_reason = _non_chat_reason(model_id, raw)
+            supports_text = "generatecontent" in methods and metadata_reason is None
+            reason = metadata_reason or (
+                None if supports_text else "Google does not list generateContent support for this model."
+            )
             models.append(ModelInfo(
                 id=model_id,
                 provider="gemini",
@@ -386,7 +431,7 @@ class GeminiClient(OpenAICompatibleClient):
                 contextWindow=_positive_int(raw.get("inputTokenLimit")),
                 maxOutputTokens=_positive_int(raw.get("outputTokenLimit")),
                 available=False,
-                reason=reason or "Awaiting a text-generation capability check.",
+                reason=reason or "Awaiting a live chat and streaming capability check.",
                 checkedCapabilities=("text_metadata",) if supports_text else (),
             ))
         return models

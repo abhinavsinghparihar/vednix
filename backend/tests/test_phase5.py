@@ -4,7 +4,7 @@ External services use MockTransport or a local stub; no live credentials are use
 
 from __future__ import annotations
 
-
+import asyncio
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -68,7 +68,11 @@ def test_html_to_text_drops_boilerplate():
 class _PlannerLLM:
     model = "fake-model"
 
-    async def chat(self, messages, temperature, *, model=None, images=None):
+    def __init__(self):
+        self.providers = []
+
+    async def chat(self, messages, temperature, *, model=None, images=None, provider=None):
+        self.providers.append(provider)
         return '["garuda launch", "q3 rollout"]'
 
 
@@ -87,6 +91,26 @@ def _fake_web() -> httpx.AsyncClient:
         )
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+async def test_research_planner_preserves_explicit_provider_selection():
+    llm = _PlannerLLM()
+    service = ResearchService(searxng_url="http://searx.local", llm=llm, client=_fake_web())
+    await service.run("find the launch update", provider="groq")
+    assert llm.providers == ["groq"]
+
+
+async def test_research_callbacks_are_isolated_between_concurrent_turns():
+    service = ResearchService(searxng_url="http://searx.local", client=_fake_web())
+    observed: dict[str, list[str]] = {"first": [], "second": []}
+
+    async def run(label: str) -> None:
+        async def on_step(step: str, detail: str) -> None:
+            observed[label].append(step)
+        await service.run(f"question {label}", on_step=on_step)
+
+    await asyncio.gather(run("first"), run("second"))
+    assert observed["first"] and observed["second"]
 
 
 async def test_research_service_runs_graph_and_cites():
@@ -216,7 +240,8 @@ def test_ws_internet_unavailable_is_honest_guidance(settings):
         client.app.state.core.research = _UnavailableResearch()
         try:
             frames, tokens = _collect_turn(client, internet=True)
-            assert "SearXNG unreachable" in tokens
+            assert "Search is temporarily unavailable" in tokens
+            assert "answering from model knowledge" in tokens
         finally:
             client.app.state.core.research = None
 
@@ -228,4 +253,5 @@ def test_ws_internet_disabled_server_side(settings):
         with TestClient(create_app(settings=no_web, llm_client=FakeLLM())) as client2:
             assert client2.app.state.core.research is None  # …while "" disables it
             frames, tokens = _collect_turn(client2, internet=True)
-            assert "disabled on this server" in tokens
+            assert "Search is unavailable on this server" in tokens
+            assert "answering from model knowledge" in tokens

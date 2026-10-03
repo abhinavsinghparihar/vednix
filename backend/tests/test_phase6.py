@@ -261,6 +261,7 @@ def test_ws_multi_agent_unavailable_is_honest(settings):
         try:
             frames = _collect_ws_turn(client, multi_agent=True)
             tokens = "".join(f.get("content", "") for f in frames if f.get("type") == "token")
-            assert "SearXNG unreachable" in tokens
+            assert "Search is temporarily unavailable" in tokens
+            assert "answering from model knowledge" in tokens
         finally:
             client.app.state.core.research = None

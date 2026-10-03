@@ -90,12 +90,19 @@ export interface ModelInfo {
   displayName: string;
   capabilities: {
     text: boolean;
+    chat: boolean;
+    streaming: boolean;
     vision: boolean;
+    imageInput: boolean;
+    documentInput: boolean;
+    tools: boolean;
+    toolCalling: boolean;
+    structuredOutput: boolean;
+    reasoning: boolean;
     audioInput: boolean;
     audioOutput: boolean;
     imageGeneration: boolean;
     video: boolean;
-    tools: boolean;
   };
   contextWindow: number | null;
   maxOutputTokens: number | null;
@@ -103,6 +110,13 @@ export interface ModelInfo {
   reason: string | null;
   latencyMs: number | null;
   checkedCapabilities: string[];
+}
+
+export interface CreatorIdentity {
+  product: string;
+  creator: string;
+  github_username: string;
+  linkedin_url: string | null;
 }
 
 export interface ModelCatalog {
@@ -123,6 +137,7 @@ export interface ModelCatalog {
 
 export const api = {
   health: () => request<HealthInfo>("/api/health"),
+  creatorIdentity: () => request<CreatorIdentity>("/api/system/identity"),
   models: (provider?: string | null, task = "text", force = false) => {
     const params = new URLSearchParams({ task });
     if (provider) params.set("provider", provider);

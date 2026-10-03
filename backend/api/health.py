@@ -94,7 +94,7 @@ async def models(
             "enabled": bool(row and row.enabled),
             "model_available": bool(default),
             "chat_available": bool(default and row and row.enabled and row.status == "connected"),
-            "error": None if result["available"] else f"No validated {task.replace('_', ' ')} models are available from {REGISTRY[target].label}.",
+            "error": None if result["available"] else f"Provider connected — no compatible {task.replace('_', ' ')} model available from {REGISTRY[target].label}.",
         })
         if provider or result["available"]:
             return result

@@ -46,10 +46,14 @@ class LLMClient(Protocol):
 
     model: str
 
-    async def is_available(self, provider: str | None = None) -> bool: ...
-    async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> str: ...
-    def chat_stream(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None) -> AsyncIterator[str]: ...
+    async def is_available(self, provider: str | None = None, *, task: str | tuple[str, ...] = "text") -> bool: ...
+    async def chat(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None, task: str | tuple[str, ...] = "text") -> str: ...
+    def chat_stream(self, messages: list[dict], temperature: float, *, model: str | None = None, images: list[str] | None = None, provider: str | None = None, task: str | tuple[str, ...] = "text") -> AsyncIterator[str]: ...
     async def list_models_cached(self, ttl: float = 30.0, provider: str | None = None, *, task: str = "text") -> list[str]: ...
+
+
+class AttachmentLimitExceeded(ValueError):
+    """A supported request exceeded the current model-adapter image limit."""
 
 
 @dataclass
@@ -94,6 +98,7 @@ class EngineSession:
         self.last_kb_sources: list[str] = []
         self.last_sources: list[dict] = []  # web citations (Phase 5): [{title, url}]
         self.last_steps: list[dict] = []    # agent trace (Phase 6): [{step, detail}]
+        self.last_error: dict[str, str] | None = None
 
     async def persist_partial(self, partial: str) -> None:
         """Transport calls this on cancel — user keeps what they saw (audit B5)."""
@@ -128,6 +133,7 @@ class EngineSession:
         self.last_kb_sources = []
         self.last_sources = []
         self.last_steps = []
+        self.last_error = None
 
         attachments_json = (
             json.dumps([{"id": a.id, "name": a.name, "kind": a.kind, "size": a.size} for a in attachments])
@@ -157,25 +163,53 @@ class EngineSession:
             yield result
             return
 
-        # 3. LLM path. Provider-specific readiness keeps explicit selection strict.
+        # 3. LLM path. Capability-bound inputs route through verified models;
+        # search itself is handled by the app-owned retrieval graph below.
+        needs_vision = any(item.kind == "image" for item in attachments)
+        needs_documents = any(item.kind != "image" for item in attachments)
+        # Search is an app-owned retrieval graph (not a provider function-call
+        # payload) and needs verified text chat. Documents are extracted to
+        # bounded text; composite inputs must satisfy each real model capability.
+        required_capabilities = tuple(
+            task for enabled, task in (
+                (needs_documents, "document_input"),
+                (needs_vision, "vision"),
+            ) if enabled
+        ) or ("text",)
+        # An explicit provider choice stays strict for attachments too; only
+        # automatic priority mode may route/fail over across providers.
+        selected_provider = provider
+        required_task: str | tuple[str, ...] = (
+            required_capabilities[0] if len(required_capabilities) == 1 else required_capabilities
+        )
         availability = self.core.llm.is_available
         try:
             try:
-                ready = await availability(provider=provider)
+                ready = await availability(provider=selected_provider, task=required_task)
             except TypeError:  # compatibility with injected test/stub clients
-                ready = await availability()
+                ready = await availability(provider=selected_provider)
         except Exception:
             ready = False
         if not ready:
             await self.state.set(CoreState.IDLE)
-            unavailable = getattr(self.core.llm, "unavailable_message", None)
-            if unavailable is not None:
-                try:
-                    message = await unavailable(provider)
-                except Exception:
-                    message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
+            if needs_vision:
+                scope = f"{selected_provider} has no" if selected_provider else "No enabled provider has a"
+                message = f"{scope} verified, streaming image-input model. Remove the image or verify a compatible vision model in Settings."
+                self.last_error = {"code": "VISION_UNAVAILABLE", "message": message}
+            elif needs_documents:
+                scope = f"{selected_provider} has no" if selected_provider else "No enabled provider has a"
+                message = f"{scope} verified model for extracted document text. Verify a text chat model in Settings."
+                self.last_error = {"code": "DOCUMENT_INPUT_UNAVAILABLE", "message": message}
             else:
-                message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
+                unavailable = getattr(self.core.llm, "unavailable_message", None)
+                if unavailable is not None:
+                    try:
+                        message = await unavailable(selected_provider)
+                    except Exception:
+                        message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
+                else:
+                    message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
+                self.last_error = {"code": "PROVIDER_UNAVAILABLE", "message": message}
             yield message
             return
 
@@ -188,47 +222,64 @@ class EngineSession:
             from agents.research import ResearchUnavailable
 
             if self.core.research is None:
-                yield (
-                    "Internet research is disabled on this server "
-                    "(set VEDNIX_SEARXNG_URL to a SearXNG instance)."
-                )
-                return
-            await self.state.set(CoreState.SEARCHING)
+                yield "🌐 Search is unavailable on this server; answering from model knowledge instead.\n\n"
+            else:
+                await self.state.set(CoreState.SEARCHING)
 
-            async def report_step(step: str, detail: str) -> None:
-                entry = {"step": step, "detail": detail}
-                self.last_steps.append(entry)
-                await self.bus.publish("agent_step", entry)
+                async def report_step(step: str, detail: str) -> None:
+                    entry = {"step": step, "detail": detail}
+                    self.last_steps.append(entry)
+                    await self.bus.publish("agent_step", entry)
 
-            try:
-                web = await self.core.research.run(
-                    text, depth="deep" if multi_agent else "quick", on_step=report_step
-                )
-                web_block = web.block
-                self.last_sources = [{"title": s.title, "url": s.url} for s in web.sources]
-            except ResearchUnavailable as exc:
-                await self.state.set(CoreState.IDLE)
-                yield f"🌐 {exc}"
-                return
-            except Exception:
-                logger.exception("research agent failed (conv=%s)", self.conversation_id)
-                await self.state.set(CoreState.IDLE)
-                yield "⚠️ Web research failed unexpectedly. Detail was logged."
-                return
+                try:
+                    research_options = {
+                        "depth": "deep" if multi_agent else "quick", "on_step": report_step,
+                    }
+                    try:
+                        if "provider" in inspect.signature(self.core.research.run).parameters:
+                            research_options["provider"] = selected_provider
+                    except (TypeError, ValueError):
+                        pass  # injected research services may have a legacy callable signature
+                    web = await self.core.research.run(text, **research_options)
+                    web_block = web.block
+                    self.last_sources = [{"title": s.title, "url": s.url} for s in web.sources]
+                except ResearchUnavailable:
+                    await self.state.set(CoreState.THINKING)
+                    yield "🌐 Search is temporarily unavailable; answering from model knowledge instead.\n\n"
+                except Exception:
+                    logger.exception("research agent failed (conv=%s)", self.conversation_id)
+                    await self.state.set(CoreState.THINKING)
+                    yield "🌐 Search failed; answering from model knowledge instead.\n\n"
 
         await self.state.set(CoreState.THINKING)
 
         # 3a. Resolve file context + images, and route vision correctly.
-        llm_user_content, images, routed_model, no_vision = await self._enrich_with_files(
-            text, attachments, model, provider=provider
-        )
+        try:
+            llm_user_content, images, routed_model, no_vision = await self._enrich_with_files(
+                text, attachments, model, provider=selected_provider
+            )
+        except AttachmentLimitExceeded:
+            await self.state.set(CoreState.IDLE)
+            message = "Attach no more than three images to one message, then try again."
+            self.last_error = {"code": "IMAGE_LIMIT_EXCEEDED", "message": message}
+            yield message
+            return
+        except Exception:
+            logger.exception("could not read chat attachments (conv=%s)", self.conversation_id)
+            await self.state.set(CoreState.IDLE)
+            message = "Vednix could not read one of the attached files. Re-upload it and try again."
+            self.last_error = {"code": "ATTACHMENT_READ_FAILED", "message": message}
+            yield message
+            return
         if no_vision:
             await self.state.set(CoreState.IDLE)
-            active = getattr(self.core.llm, "active_label", "selected provider")
-            yield (
-                f"{active} has no model with a successful vision capability check. "
-                "Refresh the live vision model list in Settings → AI Providers, then select a validated vision model."
+            scope = f"{selected_provider} has no" if selected_provider else "No enabled provider has a"
+            message = (
+                f"{scope} model with a successful image-input check. "
+                "Refresh the live vision model list in Settings, remove the image, or verify another provider."
             )
+            self.last_error = {"code": "VISION_UNAVAILABLE", "message": message}
+            yield message
             return
         effective_model = routed_model or model or None
         if routed_model:
@@ -273,8 +324,14 @@ class EngineSession:
         effective_temperature = temperature if temperature is not None else settings.llm_temperature
         try:
             stream_options = {"model": effective_model, "images": images or None}
-            if provider:
-                stream_options["provider"] = provider
+            if selected_provider:
+                stream_options["provider"] = selected_provider
+            try:
+                params = inspect.signature(self.core.llm.chat_stream).parameters
+                if "task" in params:
+                    stream_options["task"] = required_task
+            except (TypeError, ValueError):
+                pass  # test doubles/third-party adapters may expose no signature
             async for chunk in self.core.llm.chat_stream(messages, effective_temperature, **stream_options):
                 if first:
                     await self.state.set(CoreState.SPEAKING)
@@ -284,10 +341,12 @@ class EngineSession:
         except ProviderError as exc:
             label = exc.provider if exc.provider not in {"", "Vednix"} else getattr(self.core.llm, "active_label", "AI provider")
             logger.warning("provider stream failed (provider=%s, conv=%s): %s", label, self.conversation_id, exc.message)
+            self.last_error = {"code": exc.code, "message": exc.message}
             yield f"\n\n⚠️ {label} could not complete this reply: {exc.message} This reply was not saved."
         except Exception:
             logger.exception("unexpected engine error (conv=%s)", self.conversation_id)
-            yield "\n\n⚠️ Something unexpected went wrong. Detail was logged."
+            self.last_error = {"code": "PROVIDER_UNAVAILABLE", "message": "The AI provider could not complete this reply."}
+            yield "\n\n⚠️ The AI provider could not complete this reply. Please try again. This reply was not saved."
         else:
             full = "".join(chunks).strip()
             if full:
@@ -335,35 +394,34 @@ class EngineSession:
         routed_model: str | None = None
         no_vision = False
         if image_ids:
-            # Automatic mode lets the router choose a validated vision-capable
-            # model across providers. An explicit provider can be rerouted only
-            # to another model validated for that same provider.
-            if provider:
-                desired = requested_model or self.core.llm.model
-                checker = getattr(self.core.llm, "supports_images", None)
-                can_see = False
-                if checker is not None and desired:
-                    try:
-                        result = checker(desired, provider=provider)
-                    except TypeError:
-                        result = checker(desired)
-                    if inspect.isawaitable(result):
-                        result = await result
-                    can_see = bool(result)
-                if not can_see:
-                    try:
-                        vision_models = await self.core.llm.list_models_cached(
-                            provider=provider, task="vision"
-                        )
-                    except TypeError:  # compatibility with injected test clients
-                        vision_models = await self.core.llm.list_models_cached()
-                    if not vision_models:
-                        return enriched, [], None, True
-                    routed_model = vision_models[0]
+            if len(image_ids) > 3:
+                raise AttachmentLimitExceeded("At most three images can be routed in one message.")
+            desired = requested_model or self.core.llm.model
+            checker = getattr(self.core.llm, "supports_images", None)
+            can_see = False
+            if checker is not None and desired:
+                try:
+                    result = checker(desired, provider=provider)
+                except TypeError:
+                    result = checker(desired)
+                if inspect.isawaitable(result):
+                    result = await result
+                can_see = bool(result)
+            if not can_see:
+                try:
+                    vision_models = await self.core.llm.list_models_cached(
+                        provider=provider, task="vision"
+                    )
+                except TypeError:  # compatibility with injected test clients
+                    vision_models = await self.core.llm.list_models_cached()
+                if not vision_models:
+                    return enriched, [], None, True
+                routed_model = vision_models[0]
             for image_id in image_ids[:3]:  # cap: 3 images per turn
-                blob = await self.core.files.read_blob_base64(image_id)
-                if blob:
-                    images.append(blob)
+                image = await self.core.files.read_image_data_url(image_id)
+                if not image:
+                    raise ValueError("An attached image could not be read from storage.")
+                images.append(image)
         return enriched, images, routed_model, no_vision
 
 

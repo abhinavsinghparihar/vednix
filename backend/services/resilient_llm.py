@@ -113,6 +113,11 @@ class ResilientLLM:
         if not rows:
             return "No AI provider is configured. Add a Gemini or Groq API key in Settings → AI Providers."
         if not any(row["verified"] and row["enabled"] for row in rows):
+            failed = next((row for row in rows if row["status"] == "failed" and row["status_detail"]), None)
+            if failed:
+                label = REGISTRY.get(failed["provider"], None)
+                prefix = f"{label.label}: " if label else ""
+                return prefix + failed["status_detail"]
             return "No provider is verified and enabled. Test a Gemini or Groq connection in Settings → AI Providers."
         return "No verified provider has a usable model for this request. Refresh model validation in Settings → AI Providers."
 
@@ -151,68 +156,115 @@ class ResilientLLM:
             )
         return info
 
+    @staticmethod
+    def _tasks(task: ModelTask | tuple[ModelTask, ...]) -> tuple[ModelTask, ...]:
+        tasks = (task,) if isinstance(task, str) else tuple(dict.fromkeys(task))
+        return tasks or ("text",)
+
+    @staticmethod
+    def _failure_task(error: ProviderError, tasks: tuple[ModelTask, ...]) -> ModelTask:
+        if error.category == "vision_unsupported":
+            return "vision"
+        if error.category == "tool_calling_unsupported":
+            return "tools"
+        if error.category in {"streaming_unsupported", "unsupported_model"}:
+            # A missing/deprecated model is unusable for every modality, not
+            # just the last optional capability attached to this request.
+            return "text"
+        return next((task for task in reversed(tasks) if task != "text"), "text")
+
     async def _choose_model(
         self,
         provider: str,
         client: OpenAICompatibleClient,
         requested: str | None,
         *,
-        task: ModelTask,
+        task: ModelTask | tuple[ModelTask, ...],
         strict: bool,
     ) -> str:
+        required = self._tasks(task)
         row = await self._row_for(provider)
         desired = (requested or (row.model_override if row else None) or client.model or "").strip()
         if provider == "gemini" and desired:
             desired = normalize_gemini_model(desired)
 
+        async def check_model(model_id: str) -> str:
+            for capability in required:
+                await self._validated(provider, model_id, capability)
+            return model_id
+
+        last_error: ProviderError | None = None
         if desired:
             try:
-                return (await self._validated(provider, desired, task)).id
+                return await check_model(desired)
             except ProviderError as exc:
+                last_error = exc
                 if strict:
                     raise
-                logger.info("Skipping %s model %s for %s: %s", provider, desired, task, exc.message)
+                logger.info("Skipping %s model %s for %s: %s", provider, desired, "+".join(required), exc.message)
 
         if strict and desired:
             raise ProviderError(
                 REGISTRY[provider].label,
-                f"Model `{desired}` is not validated for {task}. Refresh the live model list and select a usable model.",
-                category="capability", model_id=desired,
+                last_error.message if last_error else f"Model `{desired}` is not validated for this request.",
+                category=last_error.category if last_error else "capability",
+                model_id=desired,
             )
 
-        cached = await self._service.cached_models(provider, task=task)
-        if cached:
-            return cached[0].id
-
-        try:
-            catalog = await self._service.model_catalog(provider, settings=self._settings, task=task)
-        except ProviderError:
-            raise
-        except ValueError as exc:
-            raise ProviderError(REGISTRY[provider].label, str(exc), category="configuration") from exc
-        if catalog["models"]:
-            return str(catalog["models"][0]["id"])
+        # Gather verified candidates for all requested capabilities, then test
+        # their intersection. Never pass unsupported images/tools to a model.
+        candidate_ids: list[str] = []
+        base = await self._service.cached_models(provider, task="text")
+        candidate_ids.extend(info.id for info in base)
+        for capability in required:
+            compatible = await self._service.cached_models(provider, task=capability)
+            candidate_ids.extend(info.id for info in compatible)
+            if not compatible:
+                try:
+                    catalog = await self._service.model_catalog(
+                        provider, settings=self._settings, task=capability,
+                    )
+                    candidate_ids.extend(str(item["id"]) for item in catalog["models"])
+                except ProviderError:
+                    raise
+                except ValueError as exc:
+                    raise ProviderError(REGISTRY[provider].label, str(exc), category="configuration") from exc
+        for model_id in dict.fromkeys(candidate_ids):
+            try:
+                return await check_model(model_id)
+            except ProviderError as exc:
+                last_error = exc
+        detail = last_error.message if last_error else (
+            f"{REGISTRY[provider].label} has no validated {', '.join(required)} model available."
+        )
         raise ProviderError(
-            REGISTRY[provider].label,
-            f"{REGISTRY[provider].label} has no validated {task.replace('_', ' ')} model available.",
-            category="capability",
+            REGISTRY[provider].label, detail,
+            category=last_error.category if last_error else "capability",
+            model_id=last_error.model_id if last_error else None,
         )
 
-    async def is_available(self, provider: str | None = None) -> bool:
+    async def is_available(
+        self, provider: str | None = None, *, task: ModelTask | tuple[ModelTask, ...] = "text",
+    ) -> bool:
         try:
             candidates = await self._candidates(provider)
         except ProviderError:
             return False
         for name, client in candidates:
             try:
-                model = await self._choose_model(name, client, None, task="text", strict=provider is not None)
+                model = await self._choose_model(name, client, None, task=task, strict=provider is not None)
                 self._active_provider = name
                 self._active_model = model
                 return True
             except ProviderError as exc:
+                row = await self._row_for(name)
+                selected = exc.model_id or (row.model_override if row else None) or client.model
+                await self._mark_error(
+                    name, exc, selected, self._failure_task(exc, self._tasks(task)),
+                )
                 if provider is not None:
                     return False
-                logger.info("Provider %s is not ready for text: %s", name, exc.message)
+                logger.info("Provider %s is not ready for %s: %s", name, task, exc.message)
         return False
 
     async def chat_available(self, provider: str | None = None) -> bool:
@@ -236,14 +288,32 @@ class ResilientLLM:
     async def list_models_cached(
         self, ttl: float = 30.0, provider: str | None = None, *, task: str = "text",
     ) -> list[str]:
-        # The service's successful capability rows are cached for hours. Chat
-        # requests do not refresh every model; only explicit discovery does.
-        if provider is None:
-            candidates = await self._candidates()
-            if not candidates:
+        """Use fresh evidence first; discover a compatible model on demand."""
+        if provider is not None:
+            cached = await self._service.cached_models(provider, task=task)
+            if cached:
+                return [info.id for info in cached]
+            try:
+                catalog = await self._service.model_catalog(provider, settings=self._settings, task=task)
+            except (ProviderError, ValueError):
                 return []
-            provider = candidates[0][0]
-        return [info.id for info in await self._service.cached_models(provider, task=task)]
+            return list(catalog["available"])
+
+        try:
+            candidates = await self._candidates()
+        except ProviderError:
+            return []
+        for name, _client in candidates:
+            cached = await self._service.cached_models(name, task=task)
+            if cached:
+                return [info.id for info in cached]
+            try:
+                catalog = await self._service.model_catalog(name, settings=self._settings, task=task)
+            except (ProviderError, ValueError):
+                continue
+            if catalog["available"]:
+                return list(catalog["available"])
+        return []
 
     async def supports_images(self, model: str | None = None, provider: str | None = None) -> bool:
         if provider:
@@ -316,14 +386,17 @@ class ResilientLLM:
         model: str | None = None,
         images: list[str] | None = None,
         provider: str | None = None,
+        task: ModelTask | tuple[ModelTask, ...] = "text",
     ) -> str:
-        task: ModelTask = "vision" if images else "text"
+        requested_tasks = self._tasks(task)
+        required = self._tasks(("vision", *requested_tasks) if images else requested_tasks)
         candidates = await self._candidates(provider)
         errors: list[str] = []
         for name, client in candidates:
+            selected = model or client.model
             try:
                 selected = await self._choose_model(
-                    name, client, model, task=task, strict=provider is not None,
+                    name, client, model, task=required, strict=provider is not None,
                 )
                 response = await client.chat(
                     messages, temperature, model=selected, images=images,
@@ -334,7 +407,9 @@ class ResilientLLM:
                 self._active_model = selected
                 return response
             except ProviderError as exc:
-                await self._mark_error(name, exc, model or client.model, task)
+                await self._mark_error(
+                    name, exc, selected or client.model, self._failure_task(exc, required),
+                )
                 if provider is not None:
                     raise
                 errors.append(f"{REGISTRY[name].label}: {exc.message}")
@@ -352,8 +427,10 @@ class ResilientLLM:
         model: str | None = None,
         images: list[str] | None = None,
         provider: str | None = None,
+        task: ModelTask | tuple[ModelTask, ...] = "text",
     ) -> AsyncIterator[str]:
-        task: ModelTask = "vision" if images else "text"
+        requested_tasks = self._tasks(task)
+        required = self._tasks(("vision", *requested_tasks) if images else requested_tasks)
         self.last_handoff = None
         candidates = await self._candidates(provider)
         errors: list[str] = []
@@ -361,7 +438,7 @@ class ResilientLLM:
             label = REGISTRY[name].label
             try:
                 selected = await self._choose_model(
-                    name, client, model, task=task, strict=provider is not None,
+                    name, client, model, task=required, strict=provider is not None,
                 )
             except ProviderError as exc:
                 if provider is not None:
@@ -393,7 +470,7 @@ class ResilientLLM:
                 self._active_model = selected
                 return
             except ProviderError as exc:
-                await self._mark_error(name, exc, selected, task)
+                await self._mark_error(name, exc, selected, self._failure_task(exc, required))
                 if started:
                     raise ProviderError(
                         label,

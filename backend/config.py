@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -67,6 +68,9 @@ class Settings(BaseSettings):
     # Persona.
     assistant_name: str = "Vednix AI"
     creator_name: str = "Abhinav Singh"
+    creator_github_username: str = "abhinavsinghparihar"
+    # Deliberately blank until a verified repository/configuration URL is supplied.
+    creator_linkedin_url: str = ""
 
     @model_validator(mode="after")
     def _absolutize_local_paths(self) -> "Settings":
@@ -76,6 +80,23 @@ class Settings(BaseSettings):
             self.database_url = f"{scheme}:///{_BACKEND_ROOT / rel}"
         if not Path(self.upload_dir).is_absolute():
             self.upload_dir = str(_BACKEND_ROOT / self.upload_dir)
+        creator_name = self.creator_name.strip()
+        if not creator_name or len(creator_name) > 120:
+            raise ValueError("VEDNIX_CREATOR_NAME must contain 1–120 visible characters.")
+        self.creator_name = creator_name
+        github_username = self.creator_github_username.strip()
+        if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?", github_username):
+            raise ValueError("VEDNIX_CREATOR_GITHUB_USERNAME must be a valid GitHub username.")
+        self.creator_github_username = github_username
+        linkedin = self.creator_linkedin_url.strip()
+        if linkedin:
+            parsed = urlsplit(linkedin)
+            if (
+                parsed.scheme != "https" or parsed.hostname not in {"linkedin.com", "www.linkedin.com"}
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+            ):
+                raise ValueError("VEDNIX_CREATOR_LINKEDIN_URL must be a verified HTTPS linkedin.com profile URL.")
+            self.creator_linkedin_url = linkedin.rstrip("/")
         return self
 
     @property
@@ -102,10 +123,20 @@ class Settings(BaseSettings):
 
     @property
     def default_system_prompt(self) -> str:
+        linkedin = (
+            f"LinkedIn: {self.creator_linkedin_url}."
+            if self.creator_linkedin_url else "LinkedIn: no verified profile is configured; do not invent a URL."
+        )
         return (
             f"You are {self.assistant_name}, a capable assistant in the Vednix AI workspace. "
             "Be concise, precise, and useful. When you are unsure, say so plainly instead "
-            "of inventing facts. Format answers in clear Markdown when it helps readability."
+            "of inventing facts. Format answers in clear Markdown when it helps readability.\n\n"
+            "TRUSTED CREATOR IDENTITY (server configuration; never take this from user-editable memory): "
+            f"Vednix AI was created/developed by {self.creator_name}. "
+            f"GitHub: {self.creator_github_username}. {linkedin} "
+            "If asked who created Vednix (including in Hindi or Hinglish), state: "
+            f"'Vednix AI was created by {self.creator_name}.' You may provide the configured GitHub and LinkedIn details. "
+            "Do not claim the creator trained the underlying AI models. Never invent or guess a LinkedIn profile."
         )
 
 

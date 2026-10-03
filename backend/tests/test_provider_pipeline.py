@@ -7,7 +7,9 @@ provider calls are required.
 
 from __future__ import annotations
 
+import base64
 import json
+import sqlite3
 from dataclasses import dataclass, field
 
 import httpx
@@ -22,6 +24,9 @@ from services.providers import REGISTRY
 
 GEMINI_KEY = "AIzaMockKeyForTests0123456789"
 GROQ_KEY = "gsk_mock_key_for_provider_tests"
+_TEST_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+)
 
 
 def _sse(text: str) -> bytes:
@@ -44,6 +49,7 @@ class MockProvider:
     vision_models: set[str] = field(default_factory=set)
     tool_models: set[str] = field(default_factory=set)
     reject_key: bool = False
+    catalog_status: int | None = None
     fail_stream: bool = False
     stream_text: str = "Mock provider reply."
     requests: list[dict] = field(default_factory=list)
@@ -82,6 +88,8 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
                 })
                 if config.reject_key:
                     return httpx.Response(401, json={"error": {"message": f"Invalid API key {config.key}"}})
+                if config.catalog_status:
+                    return httpx.Response(config.catalog_status, json={"error": {"message": "temporary provider outage"}})
                 page_token = request.url.params.get("pageToken")
                 page_index = 1 if page_token else 0
                 if page_index >= len(config.model_pages):
@@ -230,7 +238,8 @@ def test_gemini_official_paginated_discovery_text_and_vision_filters(settings):
         assert verified["verification_model"] == "gemini-text-a"
 
         text = client.get("/api/models", params={"provider": "gemini", "task": "text"}).json()
-        assert text["available"] == ["gemini-text-a", "gemini-vision-b"]
+        assert text["available"] == ["gemini-text-a"]
+        assert len(text["models"]) == 1  # one verified recommendation per provider/task
         assert all(item["available"] is True for item in text["models"])
         assert "gemini-embed-c" not in text["available"]
         assert all(item["capabilities"]["text"] for item in text["models"])
@@ -266,8 +275,9 @@ def test_groq_live_discovery_hides_non_chat_models(settings):
         assert text["available"] == ["groq-chat-a"]
         assert "whisper-large-v3" not in text["available"]
         assert "groq-inactive" not in text["available"]
-        assert any(item["id"] == "whisper-large-v3" for item in text["rejected"])
+        assert len(text["models"]) == 1  # only the recommended compatible chat model is exposed
         assert all(item["available"] for item in text["models"])
+        assert not any(item["model"] == "whisper-large-v3" for item in mock.requests if item["operation"] == "chat")
         assert any(item["path"] == "/openai/v1/models" for item in mock.requests if item["operation"] == "list_models")
 
 
@@ -284,6 +294,26 @@ def test_vision_and_tools_require_real_capability_probes(settings):
         assert tools["available"] == ["gemini-text-a"]
         assert all(item["capabilities"]["tools"] for item in tools["models"])
         assert any(call["tools"] for call in mock.requests if call["operation"] == "chat")
+
+        documents = client.get("/api/providers/gemini/models", params={"task": "document_input"}).json()
+        assert documents["available"] == ["gemini-text-a"]
+        document_model = documents["models"][0]
+        assert document_model["capabilities"]["documentInput"] is True
+        assert "document_input" in document_model["checkedCapabilities"]
+
+
+def test_transient_reverification_failure_does_not_disable_a_verified_provider(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        config = _gemini_config()
+        install_mocks(client.app, config)
+        _save_and_verify(client, "gemini", GEMINI_KEY)
+        config.catalog_status = 503
+
+        result = client.post("/api/providers/gemini/verify").json()
+        stored = client.get("/api/providers").json()["providers"][0]
+        assert result["connected"] is False and result["verified"] is True
+        assert result["enabled"] is True and "temporarily unavailable" in result["detail"]
+        assert stored["status"] == "connected" and stored["enabled"] is True
 
 
 def test_invalid_key_returns_safe_error_and_never_exposes_secret(settings):
@@ -312,7 +342,7 @@ def test_unlisted_or_non_chat_model_cannot_be_selected_for_chat(settings):
             })
             frames = _read_turn(ws)
         output = "".join(frame.get("content", "") for frame in frames if frame["type"] == "token")
-        assert "failed the text capability check" in output or "does not support" in output
+        assert "non-chat model" in output or "does not support" in output
         # The rejected model is probed through a non-stream check, never used
         # for a user chat stream.
         assert not any(item["model"] == "whisper-large-v3" and item["stream"] for item in mock.requests if item["operation"] == "chat")
@@ -320,11 +350,12 @@ def test_unlisted_or_non_chat_model_cannot_be_selected_for_chat(settings):
 
 def test_provider_failover_happens_before_first_token_and_is_visible(settings):
     with TestClient(create_app(settings=settings)) as client:
-        gemini = _gemini_config(fail_stream=True)
+        gemini = _gemini_config()
         groq = _groq_config()
         install_mocks(client.app, gemini, groq)
         _save_and_verify(client, "gemini", GEMINI_KEY)
         _save_and_verify(client, "groq", GROQ_KEY)
+        gemini.fail_stream = True  # verified successfully; fail only at the user turn
         client.put("/api/providers/priority", json={"order": ["gemini", "groq"]})
 
         with client.websocket_connect("/ws/chat") as ws:
@@ -341,17 +372,65 @@ def test_provider_failover_happens_before_first_token_and_is_visible(settings):
 
 def test_explicit_provider_selection_is_strict(settings):
     with TestClient(create_app(settings=settings)) as client:
-        gemini = _gemini_config(fail_stream=True)
+        gemini = _gemini_config()
         groq = _groq_config()
         install_mocks(client.app, gemini, groq)
         _save_and_verify(client, "gemini", GEMINI_KEY)
         _save_and_verify(client, "groq", GROQ_KEY)
+        gemini.fail_stream = True  # strict explicit selection must not hand off
         with client.websocket_connect("/ws/chat") as ws:
             ws.send_json({"type": "user_message", "content": "hello", "provider": "gemini"})
             frames = _read_turn(ws)
         response = "".join(frame.get("content", "") for frame in frames if frame["type"] == "token")
         assert "Google Gemini could not complete this reply" in response
         assert "Groq answered" not in response
+
+
+def test_explicit_provider_is_not_overridden_when_an_attachment_needs_vision(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        gemini = _gemini_config()
+        groq = _groq_config()
+        install_mocks(client.app, gemini, groq)
+        _save_and_verify(client, "gemini", GEMINI_KEY)
+        _save_and_verify(client, "groq", GROQ_KEY)
+        upload = client.post(
+            "/api/uploads",
+            files=[("files", ("dot.png", _TEST_PNG, "image/png"))],
+        )
+        assert upload.status_code == 201, upload.text
+
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({
+                "type": "user_message", "content": "describe this", "provider": "groq",
+                "model": "groq-chat-a", "attachments": [upload.json()[0]["id"]],
+            })
+            frames = _read_turn(ws)
+
+        output = "".join(frame.get("content", "") for frame in frames if frame["type"] == "token")
+        assert "groq has no verified" in output
+        assert not any(item.get("vision") for item in gemini.requests if item["operation"] == "chat")
+
+
+def test_expired_preflight_auth_failure_marks_provider_unavailable(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        config = _gemini_config()
+        install_mocks(client.app, config)
+        _save_and_verify(client, "gemini", GEMINI_KEY)
+        database_path = settings.database_url.split("///", 1)[1]
+        with sqlite3.connect(database_path) as db:
+            db.execute("UPDATE provider_models SET checked_at = '2000-01-01 00:00:00.000000'")
+            db.commit()
+        config.reject_key = True
+
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({"type": "user_message", "content": "hello", "provider": "gemini"})
+            frames = _read_turn(ws)
+
+        output = "".join(frame.get("content", "") for frame in frames if frame["type"] == "token")
+        provider = next(row for row in client.get("/api/providers").json()["providers"] if row["provider"] == "gemini")
+        assert "API key was rejected" in output
+        assert provider["status"] == "failed" and provider["enabled"] is False
+        assert GEMINI_KEY not in output
 
 
 def test_cors_is_exact_credentialed_and_wildcard_is_rejected(settings):
@@ -397,4 +476,9 @@ def test_custom_live_models_are_not_assumed_available(settings):
         _save_and_verify(client, "groq", GROQ_KEY)
         result = client.get("/api/models", params={"provider": "groq", "task": "text"}).json()
         assert "new-unknown-chat" not in result["available"]
-        assert any(item["id"] == "new-unknown-chat" for item in result["rejected"])
+        assert len(result["available"]) == 1
+        assert all(item["available"] for item in result["models"])
+        assert not any(
+            item["model"] == "new-unknown-chat" and item["stream"]
+            for item in config.requests if item["operation"] == "chat"
+        )
