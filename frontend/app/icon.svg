@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Vednix AI">
+  <title>Vednix AI</title>
+  <defs>
+    <linearGradient id="vn-bg" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111114" />
+      <stop offset="1" stop-color="#050505" />
+    </linearGradient>
+    <linearGradient id="vn-stroke" x1="8" y1="8" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f4d68a" />
+      <stop offset="1" stop-color="#d9a83f" />
+    </linearGradient>
+    <radialGradient id="vn-glow">
+      <stop offset="0" stop-color="#f4d68a" stop-opacity="0.5" />
+      <stop offset="1" stop-color="#f4d68a" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <rect width="48" height="48" rx="10" fill="url(#vn-bg)" />
+
+  <!-- The neural V: synapses first, then the constellation nodes on top.
+       Favicon rendering has no motion (and 16px has no room for the fine
+       echo lines), so this keeps only the marks that survive downscaling. -->
+  <path d="M13,13 C17,20 20.5,27.5 24,35" stroke="url(#vn-stroke)" stroke-width="2.6" stroke-linecap="round" fill="none" />
+  <path d="M35,13 C31,20 27.5,27.5 24,35" stroke="url(#vn-stroke)" stroke-width="2.6" stroke-linecap="round" fill="none" />
+
+  <circle cx="13" cy="13" r="7.5" fill="url(#vn-glow)" />
+  <circle cx="35" cy="13" r="7.5" fill="url(#vn-glow)" />
+  <circle cx="24" cy="35" r="7.5" fill="url(#vn-glow)" />
+
+  <circle cx="13" cy="13" r="3.1" fill="#f4d68a" stroke="#fff3d6" stroke-width="0.7" />
+  <circle cx="35" cy="13" r="3.1" fill="#f4d68a" stroke="#fff3d6" stroke-width="0.7" />
+  <circle cx="24" cy="35" r="3.1" fill="#f4d68a" stroke="#fff3d6" stroke-width="0.7" />
+</svg>

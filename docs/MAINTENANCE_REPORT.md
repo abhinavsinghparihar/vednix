@@ -17,6 +17,8 @@ npm run typecheck
 npm run build
 ```
 
+The same three commands run on every push and pull request in GitHub Actions (`.github/workflows/ci.yml`), so a change that breaks the build or the suite is caught before merge. The frontend job builds without `NEXT_PUBLIC_*` values, which also verifies the documented local/loopback defaults still resolve.
+
 Mock transport tests are deterministic provider-boundary tests; they do not prove a live key or upstream service is available. A real provider verification needs a valid key and successful external call.
 
 ## Deployment reminders

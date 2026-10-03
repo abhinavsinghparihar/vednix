@@ -30,12 +30,20 @@ npm ci
 npm run dev
 ```
 
-Local browser development uses the backend on port 8000. Run backend tests with:
+Local browser development uses the backend on port 8000. Run the checks with:
 
 ```bash
+# Backend
 cd backend
 .venv/bin/pytest -q
+
+# Frontend, in another terminal
+cd frontend
+npm run typecheck
+npm run build
 ```
+
+Every push and pull request runs the same backend suite and frontend typecheck/build through GitHub Actions (`.github/workflows/ci.yml`). No provider credentials are needed for CI; the provider boundary is exercised with an injected test transport.
 
 ## Providers and security
 
