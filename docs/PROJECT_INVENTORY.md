@@ -8,6 +8,8 @@
 - `frontend/lib/` — API clients, WebSocket client, auth/session handling, theme, TTS, and utilities.
 - `frontend/store/` — account and workspace/chat state.
 - `frontend/package.json`, `package-lock.json`, `tsconfig.json`, `next.config.ts`, and `Dockerfile` — build/runtime setup.
+- `frontend/public/` — static assets served from the web root. It must exist: the Docker image copies it into the standalone server output.
+- `frontend/app/icon.svg` — the browser tab icon (the neural-V sigil, matching `components/brand/LogoMark.tsx`).
 
 ## Backend
 
@@ -25,5 +27,6 @@
 ## Root and local/generated files
 
 - `scripts/launch.py`, `start.bat`, `start.sh`, `docker-compose.yml`, `README.md`, and `docs/` — launch, deployment, and project guidance.
+- `.github/workflows/ci.yml` — runs the backend suite and the frontend typecheck/build on pushes and pull requests.
 - Never commit credentials, encrypted-key databases, server secret files, logs, `node_modules`, `.next`, virtual environments, or Python cache files.
 - `.env.example` files contain placeholders only. Real provider keys are entered in Settings and remain server-side.

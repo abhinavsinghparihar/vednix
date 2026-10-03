@@ -1,0 +1,6 @@
+# Vednix AI — https://vednix.vercel.app
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /settings
+Disallow: /profile
