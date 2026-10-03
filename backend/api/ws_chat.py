@@ -140,6 +140,7 @@ async def _stream_reply(
             "kb_sources": session.last_kb_sources,
             "sources": session.last_sources,
             "steps": session.last_steps,
+            "error": session.last_error,
             "cancelled": False,
         }
     )

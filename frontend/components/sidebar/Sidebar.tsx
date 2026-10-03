@@ -1,6 +1,6 @@
 /**
  * Glass sidebar: brand, new chat, live search, conversation list with
- * pin/rename/delete, backend health footer.
+ * pin/rename/delete, backend health footer; modal drawer on phones.
  */
 
 "use client";
@@ -217,7 +217,7 @@ export function Sidebar() {
             )}
           </div>
 
-          {/* footer: health + creator signature */}
+          {/* provider and backend status */}
           <div className="mt-3 flex items-center justify-between rounded-xl bg-black/30 px-3 py-2 text-[11px] text-muted">
             <span className="flex items-center gap-1.5">
               <span
@@ -231,8 +231,6 @@ export function Sidebar() {
             <span className={cn(chatAvailable ? "text-gold/80" : "text-red-300/80")}>
               {providerLabel} {chatAvailable ? "✓" : "✕"}
             </span>
-          </div>
-          <div className="mt-2.5 flex justify-center pb-0.5">
           </div>
           </motion.aside>
         </>

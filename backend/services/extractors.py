@@ -143,14 +143,16 @@ EXTRACTORS = {
 }
 
 
-def extract_text(path: Path, kind: str, filename: str) -> str:
-    """Dispatch by kind with extension-aware refinement (csv vs xlsx, pdf vs docx)."""
+def extract_text(path: Path, kind: str, filename: str, *, max_chars: int = 16_000) -> str:
+    """Dispatch and cap cached text; one sentinel character communicates truncation."""
     if kind == "image":
         raise ExtractionError("Images are analyzed by a vision model — there is no text layer.")
     ext = path.suffix.lower()
     if ext == ".pdf":
-        return _extract_pdf(path)
-    if ext == ".csv":
-        return _extract_csv(path)
-    extractor = EXTRACTORS.get(kind, _extract_text)
-    return extractor(path)
+        text = _extract_pdf(path)
+    elif ext == ".csv":
+        text = _extract_csv(path)
+    else:
+        extractor = EXTRACTORS.get(kind, _extract_text)
+        text = extractor(path)
+    return text[:max(0, max_chars) + 1]

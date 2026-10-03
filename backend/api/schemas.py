@@ -184,7 +184,7 @@ class PriorityIn(BaseModel):
 class ModelValidateIn(BaseModel):
     model_id: str = Field(min_length=1, max_length=200)
     task: Literal[
-        "text", "vision", "audio_input", "audio_output", "image_generation", "video", "tools",
+        "text", "vision", "document_input", "audio_input", "audio_output", "image_generation", "video", "tools",
     ] = "text"
 
 

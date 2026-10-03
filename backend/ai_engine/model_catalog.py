@@ -1,7 +1,8 @@
 """Provider-neutral model metadata and task capability filtering.
 
-The model identifiers and limits come from each provider's live API. A model
-is marked usable only after the server-side adapter validates the operation.
+Provider catalogs are candidate inputs only. ``chat``, ``streaming``, vision,
+and tool capabilities become true only after the corresponding live request
+has succeeded through the exact adapter path used by Vednix.
 """
 
 from __future__ import annotations
@@ -10,25 +11,40 @@ from dataclasses import asdict, dataclass
 from typing import Literal
 
 ModelTask = Literal[
-    "text", "vision", "audio_input", "audio_output", "image_generation", "video", "tools",
+    "text", "vision", "document_input", "audio_input", "audio_output",
+    "image_generation", "video", "tools",
 ]
 
 
 @dataclass(frozen=True)
 class ModelCapabilities:
+    # ``text`` is retained as a provider-metadata/backwards-compatibility field.
+    # Chat and streaming are separate verified requirements for the Chat UI.
     text: bool = False
+    chat: bool = False
+    streaming: bool = False
     vision: bool = False
+    imageInput: bool = False
+    documentInput: bool = False
+    tools: bool = False
+    toolCalling: bool = False
+    structuredOutput: bool = False
+    reasoning: bool = False
     audioInput: bool = False
     audioOutput: bool = False
     imageGeneration: bool = False
     video: bool = False
-    tools: bool = False
 
     def supports(self, task: ModelTask) -> bool:
+        chat_stream = self.text and self.chat and self.streaming
         if task == "text":
-            return self.text
+            return chat_stream
         if task == "vision":
-            return self.text and self.vision
+            return chat_stream and self.vision and self.imageInput
+        if task == "document_input":
+            # Vednix extracts safe text from supported documents before sending
+            # it as ordinary text; this is not a claim of native PDF ingestion.
+            return chat_stream and self.documentInput
         if task == "audio_input":
             return self.audioInput
         if task == "audio_output":
@@ -38,7 +54,7 @@ class ModelCapabilities:
         if task == "video":
             return self.video
         if task == "tools":
-            return self.text and self.tools
+            return chat_stream and self.tools and self.toolCalling
         return False
 
 

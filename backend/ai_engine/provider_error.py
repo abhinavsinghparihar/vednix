@@ -25,26 +25,68 @@ class ProviderError(RuntimeError):
         super().__init__(f"{provider}: {message}")
 
     @property
+    def code(self) -> str:
+        """Stable internal classification; frontend messages never expose internals."""
+        return {
+            "authentication": "INVALID_API_KEY",
+            "permission_denied": "PERMISSION_DENIED",
+            "unsupported_model": "MODEL_NOT_FOUND",
+            "capability": "MODEL_NOT_COMPATIBLE",
+            "streaming_unsupported": "STREAMING_UNSUPPORTED",
+            "vision_unsupported": "VISION_UNSUPPORTED",
+            "tool_calling_unsupported": "TOOL_CALLING_UNSUPPORTED",
+            "rate_limit": "RATE_LIMITED",
+            "timeout": "PROVIDER_TIMEOUT",
+            "temporary": "PROVIDER_UNAVAILABLE",
+            "invalid_request": "INVALID_REQUEST",
+            "search_unavailable": "SEARCH_UNAVAILABLE",
+            "multi_agent_unavailable": "MULTI_AGENT_UNAVAILABLE",
+        }.get(self.category, "PROVIDER_UNAVAILABLE" if self.retryable else "PROVIDER_ERROR")
+
+    @property
     def authentication_error(self) -> bool:
-        return self.category == "authentication"
+        return self.category in {"authentication", "permission_denied"}
 
     @property
     def unsupported_model(self) -> bool:
-        return self.category in {"unsupported_model", "capability"}
+        return self.category in {
+            "unsupported_model", "capability", "streaming_unsupported",
+            "vision_unsupported", "tool_calling_unsupported",
+        }
 
     @classmethod
     def from_http(
         cls, provider: str, status: int, detail: str, *, model_id: str | None = None,
     ) -> "ProviderError":
-        if status in (401, 403):
+        """Classify common Gemini/OpenAI-compatible errors without returning raw bodies."""
+        hint = " ".join(str(detail or "").lower().replace("_", " ").split())
+
+        if any(term in hint for term in ("invalid api key", "api key not valid", "api_key_invalid", "key is invalid")):
             return cls(
                 provider,
-                "API key was rejected or does not have permission. Reconnect this provider.",
+                "API key was rejected as invalid. Check the provider console and reconnect.",
+                category="authentication", http_status=status, model_id=model_id,
+            )
+        if status in (401, 403):
+            if status == 403 and any(term in hint for term in ("quota", "rate limit", "resource exhausted")):
+                return cls(
+                    provider, "Rate limit or quota reached. Try again later or check provider billing.",
+                    category="rate_limit", http_status=status, retryable=True, model_id=model_id,
+                )
+            if status == 403:
+                return cls(
+                    provider,
+                    "Permission denied. Check that this API is enabled for the project and that the key's restrictions allow server-side use.",
+                    category="permission_denied", http_status=status, model_id=model_id,
+                )
+            return cls(
+                provider, "API key was rejected. Check that the saved provider key is valid and reconnect.",
                 category="authentication", http_status=status, model_id=model_id,
             )
         if status == 404:
             return cls(
-                provider, "The provider rejected this model or endpoint. Refresh the model list.",
+                provider,
+                "The model was not found or is no longer available to this provider key. Refresh verified models.",
                 category="unsupported_model", http_status=status, model_id=model_id,
             )
         if status == 429:
@@ -58,13 +100,20 @@ class ProviderError(RuntimeError):
                 category="temporary", http_status=status, retryable=True, model_id=model_id,
             )
         if status == 400:
-            return cls(
-                provider, detail or "The provider rejected this model for the current request.",
-                category="capability" if model_id else "invalid_request",
-                http_status=status, model_id=model_id,
-            )
+            if any(term in hint for term in ("streaming not supported", "does not support streaming", "stream is not supported")):
+                category, message = "streaming_unsupported", "This model does not support Vednix streaming."
+            elif any(term in hint for term in ("image input", "vision", "images are not supported")):
+                category, message = "vision_unsupported", "This model does not support image input."
+            elif any(term in hint for term in ("tool calling", "function calling", "tools are not supported")):
+                category, message = "tool_calling_unsupported", "This model does not support tool calling."
+            elif any(term in hint for term in ("model not found", "unknown model", "no such model")):
+                category, message = "unsupported_model", "The model was not found or is no longer available. Refresh verified models."
+            elif model_id:
+                category, message = "capability", "The model rejected Vednix's chat request format and is not compatible."
+            else:
+                category, message = "invalid_request", "The provider rejected this request format. Check the request and model configuration."
+            return cls(provider, message, category=category, http_status=status, model_id=model_id)
         return cls(
-            provider, detail or f"Provider request failed (HTTP {status}).",
-            category="provider_error", http_status=status, retryable=status >= 500,
-            model_id=model_id,
+            provider, "The provider rejected the request. Check its current API and model permissions.",
+            category="provider_error", http_status=status, retryable=status >= 500, model_id=model_id,
         )

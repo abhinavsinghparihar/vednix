@@ -375,11 +375,12 @@ function VoicePanel() {
   );
 }
 
-type ModelTask = "text" | "vision" | "audio_input" | "audio_output" | "image_generation" | "video" | "tools";
+type ModelTask = "text" | "vision" | "document_input" | "audio_input" | "audio_output" | "image_generation" | "video" | "tools";
 
 const TASK_CAPABILITY: Record<ModelTask, keyof ProviderModelInfo["capabilities"]> = {
   text: "text",
   vision: "vision",
+  document_input: "documentInput",
   audio_input: "audioInput",
   audio_output: "audioOutput",
   image_generation: "imageGeneration",
@@ -461,8 +462,8 @@ function ModelsPanel() {
 
   const row = providers.find((item) => item.provider === provider);
   const tasks: [ModelTask, string][] = [
-    ["text", "Text"], ["vision", "Vision"], ["audio_input", "Audio input"],
-    ["audio_output", "Audio output"], ["image_generation", "Image generation"],
+    ["text", "Text chat"], ["vision", "Image input"], ["document_input", "Document input (extracted text)"],
+    ["audio_input", "Audio input"], ["audio_output", "Audio output"], ["image_generation", "Image generation"],
     ["video", "Video"], ["tools", "Tools"],
   ];
 
@@ -470,7 +471,7 @@ function ModelsPanel() {
     <Panel>
       <Card title="Live model discovery" icon={Bot}>
         <p className="mb-4 text-[12px] leading-relaxed text-muted">
-          Models come from the selected provider's official live API. A model appears in this list only after it passes a real check for the chosen task. Chat automatically switches between text and vision filtering when an image is attached.
+          Model candidates come from the provider's live API and appear only after task checks. Vednix extracts supported documents into bounded text before sending them; that does not claim native PDF or Office-file support from the provider. Chat switches to vision-verified models when an image is attached.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">

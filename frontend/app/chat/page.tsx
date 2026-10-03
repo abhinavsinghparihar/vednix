@@ -108,7 +108,7 @@ function WorkspacePage() {
             <div className="gold-border flex flex-col items-center gap-3 rounded-3xl px-12 py-10">
               <UploadCloud className="h-10 w-10 text-gold" />
               <p className="text-lg font-semibold text-gold-bright">Drop files to attach</p>
-              <p className="text-xs text-faint">PDF · DOCX · XLSX · PPTX · CSV · images</p>
+              <p className="text-xs text-faint">PDF · DOCX · XLSX · PPTX · CSV · images (up to 3)</p>
             </div>
           </motion.div>
         )}
@@ -120,7 +120,7 @@ function WorkspacePage() {
         {view === "chat" ? (
           <motion.section
             key="chat"
-            className="relative flex w-full min-w-0 flex-1"
+            className="relative flex w-full min-w-0 flex-1 pb-[calc(3.75rem+env(safe-area-inset-bottom))] md:pb-0"
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
@@ -162,7 +162,7 @@ function WorkspacePage() {
         ) : (
           <motion.div
             key={view}
-            className="flex min-w-0 flex-1"
+            className="flex min-w-0 flex-1 pb-[calc(3.75rem+env(safe-area-inset-bottom))] md:pb-0"
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}

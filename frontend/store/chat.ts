@@ -33,6 +33,7 @@ export interface ChatMessage {
   steps?: { step: string; detail: string }[];
   streaming: boolean;
   error: boolean;
+  errorCode?: string;
 }
 
 /** Local voice arbitration: mic/speaking overrides the server-driven state so
@@ -120,6 +121,7 @@ let wsToken: string | null = null;
 let streamingId: string | null = null;
 let ttsWired = false;
 let modelRequestSequence = 0;
+let bootstrapFlight: Promise<void> | null = null;
 
 export const useChat = create<ChatStore>((set, get) => {
   if (!ttsWired && typeof window !== "undefined") {
@@ -189,7 +191,8 @@ export const useChat = create<ChatStore>((set, get) => {
           generating: false,
           messages: messages.map((m) =>
             m.id === frame.message_id
-              ? { ...m, streaming: false, plugins: frame.plugins, kbSources: frame.kb_sources ?? [],
+              ? { ...m, streaming: false, error: Boolean(frame.error), errorCode: frame.error?.code,
+                  plugins: frame.plugins, kbSources: frame.kb_sources ?? [],
                   sources: frame.sources ?? [], steps: frame.steps ?? m.steps }
               : m,
           ),
@@ -375,66 +378,65 @@ export const useChat = create<ChatStore>((set, get) => {
       set({ draftAttachments: get().draftAttachments.filter((a) => a.id !== id) }),
 
     bootstrap: async () => {
-      // Model discovery may race a quick provider change. Give bootstrap its
-      // own request id so a slow automatic catalog can never overwrite a newer
-      // provider-specific catalog in the model selector.
-      const bootstrapModelRequestId = ++modelRequestSequence;
-      const providerAtBootstrap = get().providerChoice;
-      // Do the HTTP/auth bootstrap first. Creating the socket before the
-      // access token is available causes a legitimate 4401 handshake and an
-      // unnecessary reconnect loop.
-      try {
-        const [health, textModels, visionModels, conversations] = await Promise.all([
+      if (bootstrapFlight) return bootstrapFlight;
+      bootstrapFlight = (async () => {
+        // Render/hydrate the shell from cheap state first. Provider discovery
+        // and capability probes are deliberately background work.
+        const bootstrapModelRequestId = ++modelRequestSequence;
+        const providerAtBootstrap = get().providerChoice;
+        const [healthResult, conversationsResult] = await Promise.allSettled([
           api.health(),
-          api.models(providerAtBootstrap, "text"),
-          api.models(providerAtBootstrap, "vision"),
           api.listConversations(),
         ]);
-        const catalogMatchesProvider = providerAtBootstrap === null || textModels.provider === providerAtBootstrap;
-        const options = catalogMatchesProvider ? textModels.available ?? [] : [];
-        const selectionKey = providerAtBootstrap ?? "auto";
-        const savedModel = get().modelByProvider[selectionKey];
-        const selectedModel = savedModel && options.includes(savedModel)
-          ? savedModel
-          : options.includes(textModels.default) ? textModels.default : options[0] ?? null;
-        const modelSelection = bootstrapModelRequestId === modelRequestSequence
-          ? {
+        const health = healthResult.status === "fulfilled" ? healthResult.value : null;
+        const conversations = conversationsResult.status === "fulfilled" ? conversationsResult.value : [];
+        set({
+          conversations,
+          loadingConversations: false,
+          chatAvailable: health?.chat_available ?? false,
+          provider: health?.provider ?? health?.active_provider ?? "unavailable",
+          ...(!health && !conversations.length ? {
+            providerError: healthResult.status === "rejected" && healthResult.reason instanceof Error
+              ? healthResult.reason.message : "The Vednix backend is unreachable.",
+          } : {}),
+        });
+        ensureWs();
+
+        void (async () => {
+          try {
+            const [textModels, visionModels] = await Promise.all([
+              api.models(providerAtBootstrap, "text"),
+              api.models(providerAtBootstrap, "vision"),
+            ]);
+            if (bootstrapModelRequestId !== modelRequestSequence) return;
+            const matchesProvider = providerAtBootstrap === null || textModels.provider === providerAtBootstrap;
+            const options = matchesProvider ? textModels.available ?? [] : [];
+            const selectionKey = providerAtBootstrap ?? "auto";
+            const savedModel = get().modelByProvider[selectionKey];
+            const selectedModel = savedModel && options.includes(savedModel)
+              ? savedModel
+              : options.includes(textModels.default) ? textModels.default : options[0] ?? null;
+            set({
               modelOptions: options,
-              visionModelOptions: catalogMatchesProvider && (providerAtBootstrap === null || visionModels.provider === providerAtBootstrap)
-                ? visionModels.available ?? []
-                : [],
+              visionModelOptions: matchesProvider && (providerAtBootstrap === null || visionModels.provider === providerAtBootstrap)
+                ? visionModels.available ?? [] : [],
               activeModel: selectedModel,
               modelByProvider: selectedModel
                 ? { ...get().modelByProvider, [selectionKey]: selectedModel }
                 : get().modelByProvider,
-              providerError: catalogMatchesProvider
-                ? textModels.error ?? null
+              providerError: matchesProvider ? textModels.error ?? null
                 : "The backend returned models for a different provider. Select the provider again to refresh.",
-            }
-          : {};
-        set({
-          conversations,
-          ...modelSelection,
-          chatAvailable: health.chat_available ?? false,
-          provider: health.provider ?? health.active_provider ?? "unavailable",
-          loadingConversations: false,
-        });
-        ensureWs();
-      } catch (err) {
-        set({
-          loadingConversations: false,
-          chatAvailable: false,
-          wsStatus: "closed",
-          ...(bootstrapModelRequestId === modelRequestSequence
-            ? {
-                modelOptions: [],
-                visionModelOptions: [],
-                activeModel: null,
-                providerError: err instanceof Error ? err.message : "The Vednix backend is unreachable.",
-              }
-            : {}),
-        });
-      }
+            });
+          } catch (err) {
+            if (bootstrapModelRequestId !== modelRequestSequence) return;
+            set({
+              modelOptions: [], visionModelOptions: [], activeModel: null,
+              providerError: err instanceof Error ? err.message : "Could not load verified models.",
+            });
+          }
+        })();
+      })().finally(() => { bootstrapFlight = null; });
+      return bootstrapFlight;
     },
 
     selectConversation: async (id) => {

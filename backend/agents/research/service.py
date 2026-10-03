@@ -21,8 +21,10 @@ Design invariants carried from Phase 5:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, TypedDict
 
@@ -52,6 +54,7 @@ class WebContext:
 
 class _ResearchState(TypedDict, total=False):
     question: str
+    provider: str | None
     queries: list[str]
     subqs: list[str]                  # deep mode: planner agent decomposition
     results: list[dict]
@@ -125,7 +128,20 @@ class ResearchService:
         )
         self._owns_client = client is None
         self._graphs = {"quick": self._build_quick_graph(), "deep": self._build_deep_graph()}
-        self._on_step: StepCallback | None = None  # set per run() call
+        self._step_callback: ContextVar[StepCallback | None] = ContextVar(
+            f"vednix_research_steps_{id(self)}", default=None,
+        )
+
+    async def check_available(self) -> bool:
+        """Perform a lightweight real search request without contacting an LLM."""
+        try:
+            await query_searxng(
+                self.searxng_url, self._client, "Vednix search availability", count=1,
+                timeout=min(self.timeout, 5.0),
+            )
+            return True
+        except ResearchUnavailable:
+            return False
 
     async def aclose(self) -> None:
         if self._owns_client:
@@ -134,9 +150,10 @@ class ResearchService:
     # --- shared agents -----------------------------------------------------
 
     async def _emit(self, step: str, detail: str) -> None:
-        if self._on_step is not None:
+        callback = self._step_callback.get()
+        if callback is not None:
             try:
-                await self._on_step(step, detail)
+                await callback(step, detail)
             except Exception:
                 logger.warning("agent_step subscriber failed on %s", step, exc_info=True)
 
@@ -192,12 +209,22 @@ class ResearchService:
 
     # --- quick mode agents -------------------------------------------------
 
+    async def _agent_chat(self, state: _ResearchState, messages: list[dict], temperature: float) -> str:
+        """Keep explicit provider selection consistent for planner/critic calls."""
+        kwargs: dict[str, Any] = {}
+        try:
+            if "provider" in inspect.signature(self.llm.chat).parameters:
+                kwargs["provider"] = state.get("provider")
+        except (TypeError, ValueError):
+            pass  # injected legacy/test adapters may not expose an inspectable signature
+        return await self.llm.chat(messages, temperature=temperature, **kwargs)
+
     async def _node_plan(self, state: _ResearchState) -> dict[str, Any]:
         question = state["question"]
         if self.llm is not None:
             try:
-                raw = await self.llm.chat(
-                    [{"role": "user", "content": _QUERIES_PROMPT + question[:800]}], temperature=0.1
+                raw = await self._agent_chat(
+                    state, [{"role": "user", "content": _QUERIES_PROMPT + question[:800]}], 0.1
                 )
                 queries = _salvage_json_array(raw, cap=3)
                 if queries:
@@ -212,8 +239,8 @@ class ResearchService:
         question = state["question"]
         if self.llm is not None:
             try:
-                raw = await self.llm.chat(
-                    [{"role": "user", "content": _PLAN_DEEP_PROMPT + question[:800]}], temperature=0.1
+                raw = await self._agent_chat(
+                    state, [{"role": "user", "content": _PLAN_DEEP_PROMPT + question[:800]}], 0.1
                 )
                 subqs = _salvage_json_array(raw, cap=self.max_subquestions)
                 if subqs:
@@ -231,11 +258,11 @@ class ResearchService:
             f'- "{p["title"]}" ({p["url"]}): {p["body"][:400]}' for p in state.get("pages", [])[:6]
         ) or "(no evidence fetched)"
         try:
-            raw = await self.llm.chat(
-                [{"role": "user", "content": _CRITIC_PROMPT.format(
+            raw = await self._agent_chat(
+                state, [{"role": "user", "content": _CRITIC_PROMPT.format(
                     question=state["question"][:400], subqs=json.dumps(state.get("subqs", []), ensure_ascii=False),
                     evidence=evidence,
-                )}], temperature=0.1,
+                )}], 0.1,
             )
             match = _JSON_OBJECT_RE.search(raw or "")
             data = json.loads(match.group(0)) if match else {}
@@ -306,15 +333,16 @@ class ResearchService:
     # --- public API -------------------------------------------------------------
 
     async def run(
-        self, question: str, *, depth: str = "quick", on_step: StepCallback | None = None
+        self, question: str, *, depth: str = "quick", on_step: StepCallback | None = None,
+        provider: str | None = None,
     ) -> WebContext:
-        self._on_step = on_step
+        callback_token = self._step_callback.set(on_step)
         try:
             state = await self._graphs["deep" if depth == "deep" else "quick"].ainvoke(
-                {"question": question, "round": 0, "pages": [], "results": []}
+                {"question": question, "provider": provider, "round": 0, "pages": [], "results": []}
             )
         finally:
-            self._on_step = None
+            self._step_callback.reset(callback_token)
         pages = state.get("pages", [])
         return WebContext(
             block=state.get("block", ""),

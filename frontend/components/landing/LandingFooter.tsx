@@ -4,6 +4,7 @@
  */
 
 import Link from "next/link";
+import { CreatorLinks } from "@/components/brand/CreatorLinks";
 import { Signature } from "@/components/brand/Signature";
 import { Wordmark } from "@/components/brand/Wordmark";
 
@@ -14,7 +15,10 @@ export function LandingFooter() {
         <Link href="#top" aria-label="Vednix AI — back to top">
           <Wordmark />
         </Link>
-        <Signature framed />
+        <div className="flex flex-col items-center gap-2">
+          <Signature framed />
+          <CreatorLinks />
+        </div>
         <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-faint">
           Private-first · No telemetry · © 2026
         </p>

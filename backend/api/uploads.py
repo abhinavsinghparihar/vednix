@@ -41,8 +41,14 @@ async def upload_files(
         raise HTTPException(status_code=400, detail=f"Max {MAX_BATCH} files per batch.")
 
     saved: list[UploadOut] = []
+    max_bytes = request.app.state.settings.upload_max_mb * 1024 * 1024
     for file in files:
-        data = await file.read()
+        if file.size is not None and file.size > max_bytes:
+            raise HTTPException(status_code=422, detail=f"'{file.filename or 'file'}' is larger than {max_bytes // (1024 * 1024)} MB.")
+        # Never buffer an unbounded client upload before the size guard runs.
+        data = await file.read(max_bytes + 1)
+        if len(data) > max_bytes:
+            raise HTTPException(status_code=422, detail=f"'{file.filename or 'file'}' is larger than {max_bytes // (1024 * 1024)} MB.")
         try:
             row = await store.save(file.filename or "unnamed", file.content_type or "application/octet-stream", data)
         except ValueError as exc:
