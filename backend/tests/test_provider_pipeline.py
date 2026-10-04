@@ -65,6 +65,8 @@ class MockProvider:
     tool_models: set[str] = field(default_factory=set)
     reject_key: bool = False
     catalog_status: int | None = None
+    catalog_failures: int = 0
+    unavailable_models: set[str] = field(default_factory=set)
     fail_stream: bool = False
     stream_text: str = "Mock provider reply."
     requests: list[dict] = field(default_factory=list)
@@ -101,6 +103,9 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
                 })
                 if config.reject_key:
                     return httpx.Response(401, json={"error": {"message": f"Invalid API key {config.key}"}})
+                if config.catalog_failures > 0:
+                    config.catalog_failures -= 1
+                    return httpx.Response(503, json={"error": {"message": "temporary provider outage"}})
                 if config.catalog_status:
                     return httpx.Response(config.catalog_status, json={"error": {"message": "temporary provider outage"}})
                 page_token = request.url.params.get("pageToken")
@@ -136,6 +141,8 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
                 })
                 if config.reject_key:
                     return httpx.Response(401, json={"error": {"message": f"Invalid API key {config.key}"}})
+                if model in config.unavailable_models:
+                    return httpx.Response(503, json={"error": {"message": "model temporarily unavailable"}})
                 if is_tools:
                     if model not in config.tool_models:
                         return httpx.Response(400, json={"error": {"message": "Tool calling is not supported for this model."}})
@@ -284,6 +291,46 @@ def test_gemini_official_paginated_discovery_text_and_vision_filters(settings):
         assert "/v1beta/openai/chat/completions" in chat_paths
         configured = client.get("/api/providers").text
         assert GEMINI_KEY not in configured
+
+
+def test_gemini_retries_a_transient_model_catalog_failure(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        config = _gemini_config()
+        config.catalog_failures = 1
+        mock = install_mocks(client.app, config)["gemini"]
+
+        verified = _save_and_verify(client, "gemini", GEMINI_KEY)
+
+        assert verified["connected"] is True
+        assert verified["verification_model"] == "gemini-text-a"
+        assert len([item for item in mock.requests if item["operation"] == "list_models"]) >= 3
+
+
+def test_gemini_verification_falls_back_from_a_temporarily_unavailable_model(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        config = _gemini_config()
+        config.unavailable_models.add("gemini-text-a")
+        mock = install_mocks(client.app, config)["gemini"]
+        stored = client.put(
+            "/api/providers/gemini/key",
+            json={"api_key": GEMINI_KEY, "model": "gemini-text-a"},
+        )
+        assert stored.status_code == 200
+
+        verified = client.post("/api/providers/gemini/verify").json()
+        configured = next(
+            row for row in client.get("/api/providers").json()["providers"]
+            if row["provider"] == "gemini"
+        )
+
+        assert verified["connected"] is True
+        assert verified["verification_model"] == "gemini-vision-b"
+        assert configured["model_override"] == "gemini-vision-b"
+        assert any(
+            item["model"] == "gemini-vision-b"
+            for item in mock.requests
+            if item["operation"] == "chat"
+        )
 
 
 def test_groq_live_discovery_hides_non_chat_models(settings):
