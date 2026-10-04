@@ -8,12 +8,16 @@ model as usable.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
-from typing import Any, AsyncIterator
+from collections.abc import Awaitable, Callable
+from typing import Any, AsyncIterator, TypeVar
 
 import httpx
+
+_T = TypeVar("_T")
 
 from ai_engine.model_catalog import ModelCapabilities, ModelInfo, normalize_gemini_model
 from ai_engine.provider_error import ProviderError
@@ -400,7 +404,32 @@ class GeminiClient(OpenAICompatibleClient):
             timeout=timeout, client=client,
         )
 
+    async def _retry_transient(self, operation: Callable[[], Awaitable[_T]]) -> _T:
+        """Retry one transient Google failure before surfacing it to verification."""
+        for attempt in range(2):
+            try:
+                return await operation()
+            except ProviderError as exc:
+                if not exc.retryable or attempt == 1:
+                    raise
+                # Google can briefly return 5xx while its model service is busy.
+                await asyncio.sleep(0.35)
+        raise AssertionError("Transient retry loop exited unexpectedly.")
+
+    async def probe_text(self, model_id: str) -> float:
+        return await self._retry_transient(
+            lambda: super(GeminiClient, self).probe_text(model_id)
+        )
+
+    async def probe_stream(self, model_id: str, *, images: list[str] | None = None) -> float:
+        return await self._retry_transient(
+            lambda: super(GeminiClient, self).probe_stream(model_id, images=images)
+        )
+
     async def discover_models(self) -> list[ModelInfo]:
+        return await self._retry_transient(self._discover_models_once)
+
+    async def _discover_models_once(self) -> list[ModelInfo]:
         rows: list[dict] = []
         page_token: str | None = None
         try:

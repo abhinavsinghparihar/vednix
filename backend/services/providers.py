@@ -773,26 +773,49 @@ class ProviderService:
         preserve_existing = False
         try:
             candidates = await self._discover_models(provider, client, row, force=True)
+            text_candidates = [candidate for candidate in candidates if candidate.capabilities.text]
+            ordered_candidates: list[ModelInfo] = []
             if row.model_override:
                 selected = normalize_gemini_model(row.model_override) if provider == "gemini" else row.model_override
-                candidate = next((item for item in candidates if item.id == selected), None)
-                if candidate is None:
-                    detail = "The selected model is not present in the provider's live model catalog. Refresh models and choose a listed model."
+                preferred = next((item for item in candidates if item.id == selected), None)
+                if preferred is None:
+                    detail = "The selected model is not present in the provider's live model catalog. Trying another listed text model."
+                elif preferred.capabilities.text:
+                    ordered_candidates.append(preferred)
                 else:
-                    success = await self._probe_candidate(client, candidate, "text", force=True)
-                    if not success.available:
-                        detail = success.reason or "The selected model failed the text-generation capability check."
-            else:
-                for candidate in candidates:
-                    if not candidate.capabilities.text:
-                        continue
+                    detail = preferred.reason or "The selected model does not advertise text generation. Trying another listed text model."
+            if not row.model_override or provider == "gemini":
+                ordered_candidates.extend(
+                    candidate for candidate in text_candidates
+                    if candidate.id not in {item.id for item in ordered_candidates}
+                )
+
+            transient_errors: list[ProviderError] = []
+            for candidate in ordered_candidates:
+                try:
                     result = await self._probe_candidate(client, candidate, "text", force=True)
-                    if result.available:
-                        success = result
-                        break
-                    detail = result.reason or "The provider model failed the text-generation check."
-                if success is None and not detail:
-                    detail = f"{spec.label} returned no models that advertise text generation."
+                except ProviderError as exc:
+                    if exc.authentication_error or (exc.retryable and provider != "gemini"):
+                        raise
+                    if exc.retryable:
+                        transient_errors.append(exc)
+                        detail = exc.message
+                        # A transient failure can be model-specific. Try one
+                        # alternate model, but avoid hammering a degraded API.
+                        if len(transient_errors) >= 2:
+                            break
+                        continue
+                    detail = exc.message
+                    continue
+                if result.available:
+                    success = result
+                    break
+                detail = result.reason or "The provider model failed the text-generation check."
+
+            if success is None and transient_errors:
+                raise transient_errors[-1]
+            if success is None and not detail:
+                detail = f"{spec.label} returned no models that advertise text generation."
         except ProviderError as exc:
             detail = exc.message
             preserve_existing = exc.retryable
