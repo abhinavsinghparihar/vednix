@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     )
 
     # Persistence and uploads.
+    data_dir: str = "./data"
+    secret_key: str = ""
     database_url: str = "sqlite+aiosqlite:///./data/vednix.db"
     upload_dir: str = "./data/uploads"
     upload_max_mb: int = 15
@@ -75,10 +77,27 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def _absolutize_local_paths(self) -> "Settings":
         """Anchor relative file locations to the backend root for stable deploys."""
-        scheme, sep, rel = self.database_url.partition(":///")
-        if sep and rel and rel != ":memory:" and not Path(rel).is_absolute():
-            self.database_url = f"{scheme}:///{_BACKEND_ROOT / rel}"
-        if not Path(self.upload_dir).is_absolute():
+        raw_data_dir = self.data_dir.strip() or "./data"
+        resolved_data_dir = Path(raw_data_dir) if Path(raw_data_dir).is_absolute() else (_BACKEND_ROOT / raw_data_dir)
+        self.data_dir = str(resolved_data_dir)
+
+        db_url = self.database_url.strip()
+        if db_url.startswith("postgres://"):
+            db_url = "postgresql+asyncpg://" + db_url[len("postgres://"):]
+        elif db_url.startswith("postgresql://"):
+            db_url = "postgresql+asyncpg://" + db_url[len("postgresql://"):]
+        self.database_url = db_url
+
+        if raw_data_dir != "./data" and self.database_url == "sqlite+aiosqlite:///./data/vednix.db":
+            self.database_url = f"sqlite+aiosqlite:///{resolved_data_dir / 'vednix.db'}"
+        else:
+            scheme, sep, rel = self.database_url.partition(":///")
+            if sep and rel and rel != ":memory:" and not Path(rel).is_absolute():
+                self.database_url = f"{scheme}:///{_BACKEND_ROOT / rel}"
+
+        if raw_data_dir != "./data" and self.upload_dir == "./data/uploads":
+            self.upload_dir = str(resolved_data_dir / "uploads")
+        elif not Path(self.upload_dir).is_absolute():
             self.upload_dir = str(_BACKEND_ROOT / self.upload_dir)
         creator_name = self.creator_name.strip()
         if not creator_name or len(creator_name) > 120:

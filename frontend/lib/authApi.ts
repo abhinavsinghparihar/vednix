@@ -41,8 +41,22 @@ export interface OnboardingStatus {
   chat_available: boolean;
 }
 
+export type ProviderId =
+  | "gemini"
+  | "groq"
+  | "openai"
+  | "mistral"
+  | "deepseek"
+  | "openrouter"
+  | "together"
+  | "xai"
+  | "cerebras"
+  | "sambanova"
+  | "nvidia"
+  | "perplexity";
+
 export interface ProviderCatalogItem {
-  id: "gemini" | "groq";
+  id: ProviderId | string;
   label: string;
   kind: string;
   needs_key: boolean;

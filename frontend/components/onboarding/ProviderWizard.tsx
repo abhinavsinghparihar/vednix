@@ -89,14 +89,14 @@ function ProviderSetup({
 
         <div className="glass rounded-2xl p-5">
           <label htmlFor="provider-key" className="mb-3 block text-sm font-semibold text-cream">
-            {configured?.has_key ? "Replace saved key (optional)" : "Paste your API key"}
+            {configured?.has_key ? `Saved key ${configured.key_hint ?? ""} on server (optional replacement)` : "Paste your API key"}
           </label>
           <input
             id="provider-key"
             type="password"
             value={key}
             onChange={(event) => setKey(event.target.value)}
-            placeholder={configured?.has_key ? "Leave blank to use the saved key" : "API key"}
+            placeholder={configured?.has_key ? "Leave blank to use the saved server key" : "API key"}
             autoComplete="off"
             spellCheck={false}
             className="glass h-11 w-full rounded-xl px-3.5 font-mono text-sm text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
@@ -107,7 +107,7 @@ function ProviderSetup({
           </p>
           <div className="mt-4 flex justify-end">
             <Button variant="primary" onClick={() => void verify()} disabled={busy || (!key.trim() && !configured?.has_key)}>
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>Save securely & verify <ArrowRight className="h-4 w-4" /></>}
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>{key.trim() ? (configured?.has_key ? "Replace key & verify" : "Save securely & verify") : (configured?.has_key ? "Verify saved key" : "Save securely & verify")} <ArrowRight className="h-4 w-4" /></>}
             </Button>
           </div>
         </div>

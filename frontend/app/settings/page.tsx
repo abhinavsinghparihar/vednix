@@ -391,6 +391,7 @@ const TASK_CAPABILITY: Record<ModelTask, keyof ProviderModelInfo["capabilities"]
 function ModelsPanel() {
   const [provider, setProvider] = useState("gemini");
   const [task, setTask] = useState<ModelTask>("text");
+  const [catalog, setCatalog] = useState<ProviderCatalogItem[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
   const [models, setModels] = useState<string[]>([]);
   const [selected, setSelected] = useState("");
@@ -401,7 +402,8 @@ function ModelsPanel() {
 
   const loadProviders = useCallback(async () => {
     try {
-      const result = await providerApi.configured();
+      const [cat, result] = await Promise.all([providerApi.catalog(), providerApi.configured()]);
+      setCatalog(cat.providers);
       setProviders(result.providers);
       if (!result.providers.some((row) => row.provider === provider) && result.providers.length) {
         setProvider(result.providers[0].provider);
@@ -461,6 +463,20 @@ function ModelsPanel() {
   };
 
   const row = providers.find((item) => item.provider === provider);
+  const providerChoices = catalog.length ? catalog : [
+    { id: "gemini", label: "Google Gemini" },
+    { id: "groq", label: "Groq" },
+    { id: "openai", label: "OpenAI" },
+    { id: "mistral", label: "Mistral" },
+    { id: "deepseek", label: "DeepSeek" },
+    { id: "openrouter", label: "OpenRouter" },
+    { id: "together", label: "Together" },
+    { id: "xai", label: "xAI" },
+    { id: "cerebras", label: "Cerebras" },
+    { id: "sambanova", label: "SambaNova" },
+    { id: "nvidia", label: "NVIDIA NIM" },
+    { id: "perplexity", label: "Perplexity" },
+  ];
   const tasks: [ModelTask, string][] = [
     ["text", "Text chat"], ["vision", "Image input"], ["document_input", "Document input (extracted text)"],
     ["audio_input", "Audio input"], ["audio_output", "Audio output"], ["image_generation", "Image generation"],
@@ -477,8 +493,9 @@ function ModelsPanel() {
           <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
             Provider
             <select value={provider} onChange={(event) => setProvider(event.target.value)} className="glass h-11 w-full rounded-xl px-3 text-sm normal-case tracking-normal text-cream outline-none [&>option]:bg-charcoal">
-              <option value="gemini">Google Gemini</option>
-              <option value="groq">Groq</option>
+              {providerChoices.map((item) => (
+                <option key={item.id} value={item.id}>{item.label}</option>
+              ))}
             </select>
           </label>
           <label className="space-y-1.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-faint">
@@ -537,15 +554,18 @@ function ApiKeysPanel() {
   const rowFor = (id: string) => rows.find((row) => row.provider === id);
 
   const save = async (id: string, andVerify: boolean) => {
-    const key = draft[id] ?? "";
+    const key = (draft[id] ?? "").trim();
+    const existing = rowFor(id);
     setBusy(id);
     setNotice(null);
     try {
-      await providerApi.saveKey(id, { api_key: key });
-      setDraft((current) => ({ ...current, [id]: "" }));
+      if (key || !existing?.has_key) {
+        await providerApi.saveKey(id, { api_key: key });
+        setDraft((current) => ({ ...current, [id]: "" }));
+      }
       if (andVerify) {
         const result = await providerApi.verify(id);
-        setNotice(result.connected ? `${rowFor(id)?.label ?? id}: key and text model verified.` : `${id}: ${result.detail}`);
+        setNotice(result.connected ? `${rowFor(id)?.label ?? labelFor(id)}: key and text model verified.` : `${id}: ${result.detail}`);
       }
       await load();
     } catch (err) {
@@ -646,14 +666,19 @@ function ApiKeysPanel() {
                   <input
                     type="password" value={key}
                     onChange={(event) => setDraft((current) => ({ ...current, [provider.id]: event.target.value }))}
-                    placeholder={row?.has_key ? "Replace saved key (optional)" : "Paste API key"}
+                    placeholder={row?.has_key ? `Saved key ${row.key_hint ?? ""} on server — paste only to replace` : "Paste API key"}
                     aria-label={`${provider.label} API key`} autoComplete="off" spellCheck={false}
                     className="glass h-10 min-w-0 flex-1 rounded-xl px-3 font-mono text-sm text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
                   />
                 </div>
+                {row?.has_key && !key.trim() && (
+                  <p className="text-[11px] text-emerald-300/90">
+                    Saved key {row.key_hint ? `(${row.key_hint}) ` : ""}is already stored on the server — no need to paste it again.
+                  </p>
+                )}
                 <div className="flex flex-wrap items-center gap-2">
                   <Button variant="primary" size="sm" onClick={() => void save(provider.id, true)} disabled={busy === provider.id || (!key.trim() && !row?.has_key)}>
-                    {busy === provider.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : row?.has_key ? "Save & verify" : "Save key & verify"}
+                    {busy === provider.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : key.trim() ? (row?.has_key ? "Replace key & verify" : "Save key & verify") : (row?.has_key ? "Verify saved key" : "Save key & verify")}
                   </Button>
                   {row?.has_key && <>
                     <Button variant="subtle" size="sm" onClick={() => void verify(provider.id)} disabled={busy === provider.id}>Test connection</Button>

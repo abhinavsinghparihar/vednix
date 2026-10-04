@@ -1,4 +1,4 @@
-"""Encrypted Gemini/Groq account configuration and live model validation.
+"""Encrypted multi-provider account configuration and live model validation.
 
 Provider catalog metadata is deliberately small and static; model identifiers
 and model capabilities are always sourced from each provider's official API and
@@ -32,6 +32,7 @@ _CATALOG_TTL_SECONDS = 600
 _SECRET_PATTERNS = (
     re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
     re.compile(r"gsk_[0-9A-Za-z_-]{16,}"),
+    re.compile(r"(?:sk|rk|xai|nvapi|pplx|csk)-[0-9A-Za-z_-]{16,}"),
 )
 _SUPPORTED_TASKS: set[str] = {
     "text", "vision", "document_input", "audio_input", "audio_output",
@@ -70,8 +71,98 @@ REGISTRY: dict[str, ProviderSpec] = {
         docs_url="https://console.groq.com/docs",
         blurb="Connect Groq for fast hosted model inference.",
     ),
+    "openai": ProviderSpec(
+        id="openai",
+        label="OpenAI",
+        kind="openai_compatible",
+        base_url="https://api.openai.com/v1",
+        key_url="https://platform.openai.com/api-keys",
+        docs_url="https://platform.openai.com/docs",
+        blurb="Connect OpenAI chat and multimodal models with live capability checks.",
+    ),
+    "mistral": ProviderSpec(
+        id="mistral",
+        label="Mistral",
+        kind="openai_compatible",
+        base_url="https://api.mistral.ai/v1",
+        key_url="https://console.mistral.ai/api-keys",
+        docs_url="https://docs.mistral.ai",
+        blurb="Connect Mistral models through its official OpenAI-compatible API.",
+    ),
+    "deepseek": ProviderSpec(
+        id="deepseek",
+        label="DeepSeek",
+        kind="openai_compatible",
+        base_url="https://api.deepseek.com/v1",
+        key_url="https://platform.deepseek.com/api_keys",
+        docs_url="https://api-docs.deepseek.com",
+        blurb="Connect DeepSeek chat and reasoning models via its official API.",
+    ),
+    "openrouter": ProviderSpec(
+        id="openrouter",
+        label="OpenRouter",
+        kind="openai_compatible",
+        base_url="https://openrouter.ai/api/v1",
+        key_url="https://openrouter.ai/settings/keys",
+        docs_url="https://openrouter.ai/docs",
+        blurb="Route across hosted models through OpenRouter with live model discovery.",
+    ),
+    "together": ProviderSpec(
+        id="together",
+        label="Together",
+        kind="openai_compatible",
+        base_url="https://api.together.xyz/v1",
+        key_url="https://api.together.ai/settings/api-keys",
+        docs_url="https://docs.together.ai",
+        blurb="Connect Together AI hosted open-weight models with live verification.",
+    ),
+    "xai": ProviderSpec(
+        id="xai",
+        label="xAI",
+        kind="openai_compatible",
+        base_url="https://api.x.ai/v1",
+        key_url="https://console.x.ai",
+        docs_url="https://docs.x.ai",
+        blurb="Connect xAI Grok models through xAI's official API.",
+    ),
+    "cerebras": ProviderSpec(
+        id="cerebras",
+        label="Cerebras",
+        kind="openai_compatible",
+        base_url="https://api.cerebras.ai/v1",
+        key_url="https://cloud.cerebras.ai",
+        docs_url="https://inference-docs.cerebras.ai",
+        blurb="Connect Cerebras wafer-scale inference for low-latency chat.",
+    ),
+    "sambanova": ProviderSpec(
+        id="sambanova",
+        label="SambaNova",
+        kind="openai_compatible",
+        base_url="https://api.sambanova.ai/v1",
+        key_url="https://cloud.sambanova.ai/apis",
+        docs_url="https://docs.sambanova.ai",
+        blurb="Connect SambaNova Cloud for fast hosted open-weight models.",
+    ),
+    "nvidia": ProviderSpec(
+        id="nvidia",
+        label="NVIDIA NIM",
+        kind="openai_compatible",
+        base_url="https://integrate.api.nvidia.com/v1",
+        key_url="https://build.nvidia.com",
+        docs_url="https://docs.api.nvidia.com/nim",
+        blurb="Connect NVIDIA NIM hosted inference endpoints with live model checks.",
+    ),
+    "perplexity": ProviderSpec(
+        id="perplexity",
+        label="Perplexity",
+        kind="openai_compatible",
+        base_url="https://api.perplexity.ai",
+        key_url="https://www.perplexity.ai/settings/api",
+        docs_url="https://docs.perplexity.ai",
+        blurb="Connect Perplexity Sonar models for search-grounded and general chat.",
+    ),
 }
-DEFAULT_PRIORITY = ["gemini", "groq"]
+DEFAULT_PRIORITY = list(REGISTRY.keys())
 
 
 def provider_catalog(settings=None) -> list[dict[str, Any]]:
@@ -202,21 +293,38 @@ class ProviderService:
             if row is None:
                 row = ProviderKey(provider=provider, key_ciphertext="", enabled=False)
                 db.add(row)
+            existing_key = self._decrypt(row)
+            key_changed = bool(key and key != existing_key)
             if key:
                 row.key_ciphertext = self._vault.encrypt(key)
                 row.key_hint = KeyVault.fingerprint(key)
-            elif not self._decrypt(row):
+            elif not existing_key:
                 raise ValueError("No usable stored key exists. Enter the provider key again.")
+            model_changed = selected_model is not None and selected_model != row.model_override
             if selected_model is not None:
                 row.model_override = selected_model
-            # A key or model change invalidates all prior provider and model verification.
-            row.enabled = False
-            row.status = "unverified"
-            row.status_detail = ""
-            row.verified_at = None
-            await db.execute(delete(ProviderModel).where(ProviderModel.provider == provider))
+            if key_changed:
+                # A new key invalidates all prior provider and model verification.
+                row.enabled = False
+                row.status = "unverified"
+                row.status_detail = ""
+                row.verified_at = None
+                await db.execute(delete(ProviderModel).where(ProviderModel.provider == provider))
+            elif model_changed:
+                validated = (
+                    await db.execute(select(ProviderModel).where(
+                        ProviderModel.provider == provider,
+                        ProviderModel.model_id == selected_model,
+                    ))
+                ).scalar_one_or_none()
+                if not (self._record_fresh(validated) and bool(validated.available) and row.status == "connected" and row.verified_at is not None):
+                    row.enabled = False
+                    row.status = "unverified"
+                    row.status_detail = ""
+                    row.verified_at = None
             await db.commit()
-            self._catalog_cache.pop(provider, None)
+            if key_changed:
+                self._catalog_cache.pop(provider, None)
             priority = await self.get_priority()
             return self._public(row, priority)
 
@@ -294,7 +402,14 @@ class ProviderService:
             return GeminiClient(api_key, model, **kwargs)
         if provider == "groq":
             return GroqClient(api_key, model, **kwargs)
-        return None
+        return OpenAICompatibleClient(
+            api_key,
+            model,
+            provider=spec.id,
+            provider_name=spec.label,
+            base_url=spec.base_url,
+            **kwargs,
+        )
 
     async def _model_record(self, provider: str, model_id: str) -> ProviderModel | None:
         async with self._sessions() as db:

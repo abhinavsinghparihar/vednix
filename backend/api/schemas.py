@@ -89,13 +89,29 @@ class KnowledgeDocOut(BaseModel):
     created_at: datetime
 
 
+ProviderId = Literal[
+    "gemini",
+    "groq",
+    "openai",
+    "mistral",
+    "deepseek",
+    "openrouter",
+    "together",
+    "xai",
+    "cerebras",
+    "sambanova",
+    "nvidia",
+    "perplexity",
+]
+
+
 class WSUserMessage(BaseModel):
     type: Literal["user_message"]
     content: str = Field(min_length=1)
     conversation_id: str | None = None
     client_id: str | None = None
     model: str | None = Field(default=None, max_length=200)
-    provider: Literal["gemini", "groq"] | None = None
+    provider: ProviderId | None = None
     language: Literal["auto", "hi", "hinglish", "en"] | None = None
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     attachments: list[str] = Field(default_factory=list, max_length=5)
@@ -121,7 +137,7 @@ class RegisterIn(BaseModel):
 class LoginIn(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
-    remember: bool = False
+    remember: bool = True
     device_label: str = Field(default="", max_length=160)
 
 
@@ -178,7 +194,7 @@ class ProviderToggleIn(BaseModel):
 
 
 class PriorityIn(BaseModel):
-    order: list[str] = Field(min_length=1, max_length=8)
+    order: list[str] = Field(min_length=1, max_length=24)
 
 
 class ModelValidateIn(BaseModel):
