@@ -16,7 +16,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from ai_engine.cloud_client import GeminiClient, GroqClient
+from ai_engine.cloud_client import GeminiClient, GroqClient, OpenAICompatibleClient
 from ai_engine.model_catalog import normalize_gemini_model
 from ai_engine.provider_error import ProviderError
 from main import create_app
@@ -24,6 +24,21 @@ from services.providers import REGISTRY
 
 GEMINI_KEY = "AIzaMockKeyForTests0123456789"
 GROQ_KEY = "gsk_mock_key_for_provider_tests"
+OPENAI_KEY = "sk-mock_key_for_openai_provider_tests"
+EXPECTED_PROVIDERS = {
+    "gemini",
+    "groq",
+    "openai",
+    "mistral",
+    "deepseek",
+    "openrouter",
+    "together",
+    "xai",
+    "cerebras",
+    "sambanova",
+    "nvidia",
+    "perplexity",
+}
 _TEST_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
 )
@@ -73,11 +88,9 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
 
     def handler_for(config: MockProvider):
         def handler(request: httpx.Request) -> httpx.Response:
-            if config.provider == "gemini":
-                assert config.key not in str(request.url), "Gemini keys must not enter URLs"
-                assert request.headers.get("x-goog-api-key") == config.key
-            else:
-                assert request.headers.get("Authorization") == f"Bearer {config.key}"
+            assert config.key not in str(request.url), "Provider keys must not enter URLs"
+            assert request.headers.get("Authorization") == f"Bearer {config.key}"
+            assert "x-goog-api-key" not in request.headers
 
             if request.url.path.endswith("/models"):
                 config.requests.append({
@@ -93,7 +106,7 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
                 page_token = request.url.params.get("pageToken")
                 page_index = 1 if page_token else 0
                 if page_index >= len(config.model_pages):
-                    return httpx.Response(200, json={"data": []} if config.provider == "groq" else {"models": []})
+                    return httpx.Response(200, json={"data": []} if config.provider != "gemini" else {"models": []})
                 rows = config.model_pages[page_index]
                 has_more = page_index + 1 < len(config.model_pages)
                 if config.provider == "gemini":
@@ -149,8 +162,6 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
             return original_build(provider, row, settings=settings, for_verification=for_verification)
         key = service._decrypt(row) if row is not None else config.key
         headers = {"Authorization": f"Bearer {key}"}
-        if provider == "gemini":
-            headers["x-goog-api-key"] = key
         transport = httpx.MockTransport(handler_for(config))
         http = httpx.AsyncClient(
             transport=transport,
@@ -158,9 +169,17 @@ def install_mocks(app, *configs: MockProvider) -> dict[str, MockProvider]:
             headers=headers,
             timeout=httpx.Timeout(5.0),
         )
-        client_class = GeminiClient if provider == "gemini" else GroqClient
         model = row.model_override if row is not None and row.model_override else ""
-        client = client_class(key, model, timeout=5.0, client=http)
+        if provider == "gemini":
+            client = GeminiClient(key, model, timeout=5.0, client=http)
+        elif provider == "groq":
+            client = GroqClient(key, model, timeout=5.0, client=http)
+        else:
+            spec = REGISTRY[provider]
+            client = OpenAICompatibleClient(
+                key, model, provider=spec.id, provider_name=spec.label,
+                base_url=spec.base_url, timeout=5.0, client=http,
+            )
         client._owns_client = True
         return client
 
@@ -226,7 +245,9 @@ def test_catalog_has_only_supported_provider_setup_metadata(settings):
         result = client.get("/api/providers/catalog")
         assert result.status_code == 200
         providers = result.json()["providers"]
-        assert {item["id"] for item in providers} == {"gemini", "groq"}
+        provider_ids = {item["id"] for item in providers}
+        assert provider_ids == EXPECTED_PROVIDERS
+        assert "fireworks" not in provider_ids
         assert all("models" not in item for item in providers)
         assert all("models" not in item and "api_key" not in item for item in providers)
 
@@ -258,7 +279,7 @@ def test_gemini_official_paginated_discovery_text_and_vision_filters(settings):
             assert result.json()["available"] == []
 
         paths = {item["path"] for item in mock.requests if item["operation"] == "list_models"}
-        assert "/v1beta/models" in paths
+        assert "/v1beta/openai/models" in paths
         chat_paths = {item["path"] for item in mock.requests if item["operation"] == "chat"}
         assert "/v1beta/openai/chat/completions" in chat_paths
         configured = client.get("/api/providers").text
@@ -482,3 +503,59 @@ def test_custom_live_models_are_not_assumed_available(settings):
             item["model"] == "new-unknown-chat" and item["stream"]
             for item in config.requests if item["operation"] == "chat"
         )
+
+
+def test_ten_additional_providers_support_live_discovery_and_failover(settings):
+    additional = [
+        "openai", "mistral", "deepseek", "openrouter", "together",
+        "xai", "cerebras", "sambanova", "nvidia", "perplexity",
+    ]
+    with TestClient(create_app(settings=settings)) as client:
+        configs = [
+            MockProvider(
+                provider=pid,
+                key=f"sk-{pid}-mock-key-0123456789abcdef",
+                model_pages=[[{"id": f"{pid}-chat-1", "active": True, "context_length": 64000}]],
+                text_models={f"{pid}-chat-1"},
+                stream_text=f"{REGISTRY[pid].label} streamed reply.",
+            )
+            for pid in additional
+        ]
+        install_mocks(client.app, *configs)
+        for cfg in configs:
+            verified = _save_and_verify(client, cfg.provider, cfg.key)
+            assert verified["verification_model"] == f"{cfg.provider}-chat-1"
+
+        priority_resp = client.put("/api/providers/priority", json={"order": additional + ["gemini", "groq"]})
+        assert priority_resp.status_code == 200
+        assert priority_resp.json()["priority"][:10] == additional
+
+        with client.websocket_connect("/ws/chat") as ws:
+            ws.send_json({"type": "user_message", "content": "hello", "provider": "perplexity"})
+            frames = _read_turn(ws)
+        output = "".join(frame.get("content", "") for frame in frames if frame["type"] == "token")
+        assert "Perplexity streamed reply." in output
+
+
+def test_saved_provider_key_need_not_be_pasted_again_and_secret_persists(settings, tmp_path):
+    with TestClient(create_app(settings=settings)) as client:
+        install_mocks(client.app, _gemini_config())
+        _save_and_verify(client, "gemini", GEMINI_KEY)
+
+        # Updating without re-sending api_key preserves the stored key and verified status
+        reused = client.put("/api/providers/gemini/key", json={"api_key": ""})
+        assert reused.status_code == 200
+        assert reused.json()["has_key"] is True
+        assert reused.json()["verified"] is True
+        assert reused.json()["enabled"] is True
+
+    # Simulate container restart where secret.key is deleted from disk but DB persists
+    secret_file = tmp_path / "secret.key"
+    if secret_file.exists():
+        secret_file.unlink()
+    with TestClient(create_app(settings=settings)) as client:
+        install_mocks(client.app, _gemini_config())
+        reverified = client.post("/api/providers/gemini/verify")
+        assert reverified.status_code == 200
+        assert reverified.json()["connected"] is True
+

@@ -1,8 +1,7 @@
-"""Server-side adapters for Gemini and Groq.
+"""Server-side adapters for Gemini, Groq, and OpenAI-compatible AI providers.
 
-Both providers use OpenAI-compatible chat completions for generation. Gemini's
-catalog is fetched from Google's official REST models.list API; Groq's catalog
-comes from its official /models endpoint. Catalog entries are only candidates:
+All providers use OpenAI-compatible model discovery and chat completions over
+HTTPS with Bearer authentication only. Catalog entries are only candidates:
 ProviderService performs real, low-token capability probes before exposing a
 model as usable.
 """
@@ -25,7 +24,7 @@ logger = get_logger(__name__)
 _SECRET_PATTERNS = (
     re.compile(r"AIza[0-9A-Za-z_-]{20,}"),
     re.compile(r"gsk_[0-9A-Za-z_-]{16,}"),
-    re.compile(r"(?:sk|rk)-[0-9A-Za-z_-]{16,}"),
+    re.compile(r"(?:sk|rk|xai|nvapi|pplx|csk)-[0-9A-Za-z_-]{16,}"),
 )
 
 # A tiny, fixed, harmless JPEG used to prove the normalized format that
@@ -71,7 +70,8 @@ def _text_from_content(content: object) -> str:
 _NON_CHAT_MODEL = re.compile(
     r"(?:^|[-_/])(prompt[-_]?guard|whisper|distil[-_]?whisper|speech|tts|audio|"
     r"embedding|embed|moderation|classifier|classification|rerank(?:er)?|"
-    r"reward|safeguard|safety[-_]?classifier|transcri(?:be|ption)|image[-_]?generation)(?:$|[-_/])",
+    r"reward|safeguard|safety[-_]?classifier|transcri(?:be|ption)|"
+    r"image[-_]?generation|dall[-_]?e|babbage|davinci|ocr)(?:$|[-_/])",
     re.IGNORECASE,
 )
 
@@ -83,6 +83,9 @@ def _non_chat_reason(model_id: str, item: dict[str, Any]) -> str | None:
         return "The provider reports this model as inactive or deprecated."
     if state in {"inactive", "deprecated", "retired", "disabled", "deleted"}:
         return "The provider reports this model as inactive or deprecated."
+    model_type = str(item.get("type") or item.get("model_type") or "").strip().lower()
+    if model_type in {"embedding", "embeddings", "image", "audio", "tts", "stt", "moderation", "rerank", "transcribe"}:
+        return "This is a specialized non-chat model (for example, audio, embeddings, moderation, or classification)."
     if _NON_CHAT_MODEL.search(model_id.lower()):
         return "This is a specialized non-chat model (for example, audio, embeddings, moderation, or classification)."
     return None
@@ -124,21 +127,37 @@ class OpenAICompatibleClient:
         return await self._client.get("/models")
 
     def _parse_model_entries(self, payload: Any) -> list[ModelInfo]:
-        items = payload.get("data", []) if isinstance(payload, dict) else []
+        if isinstance(payload, list):
+            items = payload
+        elif isinstance(payload, dict):
+            items = payload.get("data") if "data" in payload else payload.get("models", [])
+        else:
+            items = []
         models: list[ModelInfo] = []
-        for item in items:
-            if not isinstance(item, dict) or not item.get("id"):
+        for item in items or []:
+            if not isinstance(item, dict) or not (item.get("id") or item.get("name")):
                 continue
-            model_id = str(item["id"]).strip()
+            model_id = str(item.get("id") or item.get("name")).strip()
             reason = _non_chat_reason(model_id, item)
             supports_chat = reason is None
+            top_provider = item.get("top_provider") if isinstance(item.get("top_provider"), dict) else {}
             models.append(ModelInfo(
                 id=model_id,
                 provider=self.provider,
-                displayName=str(item.get("name") or item.get("display_name") or model_id),
+                displayName=str(item.get("name") or item.get("display_name") or item.get("displayName") or model_id),
                 capabilities=ModelCapabilities(text=supports_chat),
-                contextWindow=_positive_int(item.get("context_window")),
-                maxOutputTokens=_positive_int(item.get("max_completion_tokens")),
+                contextWindow=_positive_int(
+                    item.get("context_window")
+                    or item.get("context_length")
+                    or item.get("max_model_len")
+                    or item.get("inputTokenLimit")
+                ),
+                maxOutputTokens=_positive_int(
+                    item.get("max_completion_tokens")
+                    or item.get("max_output_tokens")
+                    or item.get("outputTokenLimit")
+                    or top_provider.get("max_completion_tokens")
+                ),
                 available=False,
                 reason=reason or "Awaiting a live chat and streaming capability check.",
                 checkedCapabilities=(),
@@ -371,14 +390,14 @@ class OpenAICompatibleClient:
 
 
 class GeminiClient(OpenAICompatibleClient):
-    """Gemini adapter: official REST model metadata + compatible generation."""
+    """Gemini adapter: Google-compatible endpoints with Bearer auth only."""
 
     def __init__(self, api_key: str, model: str, *, timeout: float = 90.0,
                  client: httpx.AsyncClient | None = None) -> None:
         super().__init__(
             api_key, model, provider="gemini", provider_name="Google Gemini",
             base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-            timeout=timeout, client=client, extra_headers={"x-goog-api-key": api_key},
+            timeout=timeout, client=client,
         )
 
     async def discover_models(self) -> list[ModelInfo]:
@@ -386,19 +405,23 @@ class GeminiClient(OpenAICompatibleClient):
         page_token: str | None = None
         try:
             while True:
-                params: dict[str, Any] = {"pageSize": 1000}
+                params: dict[str, Any] = {}
                 if page_token:
                     params["pageToken"] = page_token
-                response = await self._client.get(
-                    "https://generativelanguage.googleapis.com/v1beta/models",
-                    params=params,
-                    headers={"x-goog-api-key": self._api_key},
-                )
+                response = await self._client.get("/models", params=params or None)
                 if not 200 <= response.status_code < 300:
                     raise _provider_error(self.provider_name, response, self._api_key)
                 payload = response.json()
-                rows.extend(payload.get("models", []))
-                page_token = payload.get("nextPageToken")
+                if isinstance(payload, dict):
+                    entries = payload.get("models") if "models" in payload else payload.get("data", [])
+                    if isinstance(entries, list):
+                        rows.extend(entries)
+                    page_token = payload.get("nextPageToken")
+                elif isinstance(payload, list):
+                    rows.extend(payload)
+                    page_token = None
+                else:
+                    page_token = None
                 if not page_token:
                     break
         except ProviderError:
@@ -414,22 +437,29 @@ class GeminiClient(OpenAICompatibleClient):
 
         models: list[ModelInfo] = []
         for raw in rows:
-            if not isinstance(raw, dict) or not raw.get("name"):
+            if not isinstance(raw, dict):
                 continue
-            model_id = normalize_gemini_model(str(raw.get("baseModelId") or raw["name"]))
-            methods = {str(method).lower() for method in raw.get("supportedGenerationMethods", [])}
+            raw_id = raw.get("baseModelId") or raw.get("id") or raw.get("name")
+            if not raw_id:
+                continue
+            model_id = normalize_gemini_model(str(raw_id))
             metadata_reason = _non_chat_reason(model_id, raw)
-            supports_text = "generatecontent" in methods and metadata_reason is None
-            reason = metadata_reason or (
-                None if supports_text else "Google does not list generateContent support for this model."
-            )
+            if "supportedGenerationMethods" in raw:
+                methods = {str(method).lower() for method in raw.get("supportedGenerationMethods", [])}
+                supports_text = "generatecontent" in methods and metadata_reason is None
+                reason = metadata_reason or (
+                    None if supports_text else "Google does not list generateContent support for this model."
+                )
+            else:
+                supports_text = metadata_reason is None
+                reason = metadata_reason
             models.append(ModelInfo(
                 id=model_id,
                 provider="gemini",
-                displayName=str(raw.get("displayName") or model_id),
+                displayName=str(raw.get("displayName") or raw.get("display_name") or raw.get("name") or model_id),
                 capabilities=ModelCapabilities(text=supports_text),
-                contextWindow=_positive_int(raw.get("inputTokenLimit")),
-                maxOutputTokens=_positive_int(raw.get("outputTokenLimit")),
+                contextWindow=_positive_int(raw.get("inputTokenLimit") or raw.get("context_window")),
+                maxOutputTokens=_positive_int(raw.get("outputTokenLimit") or raw.get("max_completion_tokens")),
                 available=False,
                 reason=reason or "Awaiting a live chat and streaming capability check.",
                 checkedCapabilities=("text_metadata",) if supports_text else (),

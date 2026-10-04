@@ -26,7 +26,7 @@ from ai_engine.engine import EngineCore
 from api import admin, auth, conversations, health, knowledge, memories, onboarding, providers, system, uploads, ws_chat
 from config import Settings, get_settings
 from core.auth import BearerAuthMiddleware
-from core.crypto import KeyVault, load_or_create_secret
+from core.crypto import KeyVault, load_or_create_persistent_secret
 from core.logging import get_logger, setup_logging
 from core.rate_limit import RateLimiter, build_rate_limiter
 from core.session import SessionMiddleware
@@ -47,11 +47,13 @@ def _build_llm(settings: Settings, providers: ProviderService) -> ResilientLLM:
 
 
 def _data_dir(settings: Settings) -> Path:
-    """Where machine-local secrets live: alongside the sqlite db (or ./data)."""
+    """Where machine-local secrets live: alongside the sqlite db (or configured data_dir)."""
     prefix = "sqlite+aiosqlite:///"
     if settings.database_url.startswith(prefix):
-        return Path(settings.database_url[len(prefix):]).parent
-    return Path("./data")
+        target = settings.database_url[len(prefix):]
+        if target and target != ":memory:":
+            return Path(target).parent
+    return Path(settings.data_dir or "./data")
 
 
 def _ensure_sqlite_dir(database_url: str) -> None:
@@ -79,7 +81,9 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         app.state.knowledge = KnowledgeService(session_factory, fts_enabled=fts_enabled)
 
         # Existing auth/session and encrypted provider-key storage remain server-side.
-        secret = load_or_create_secret(_data_dir(settings))
+        secret = await load_or_create_persistent_secret(
+            _data_dir(settings), session_factory, settings.secret_key,
+        )
         app.state.secret = secret
         app.state.users = UserService(session_factory, secret)
         app.state.providers = ProviderService(session_factory, KeyVault(secret))

@@ -10,7 +10,9 @@ services:
     environment:
       VEDNIX_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
       VEDNIX_SEARXNG_URL: ${VEDNIX_SEARXNG_URL:-http://searxng:8080}
+      VEDNIX_DATA_DIR: ${VEDNIX_DATA_DIR:-/app/data}
       VEDNIX_DATABASE_URL: ${VEDNIX_DATABASE_URL:-sqlite+aiosqlite:///./data/vednix.db}
+      VEDNIX_SECRET_KEY: ${VEDNIX_SECRET_KEY:-}
       VEDNIX_REDIS_URL: ${VEDNIX_REDIS_URL:-}
       VEDNIX_AUTH_TOKEN: ${VEDNIX_AUTH_TOKEN:-}
     volumes:
@@ -22,6 +24,8 @@ services:
       args:
         NEXT_PUBLIC_API_BASE: http://localhost:8000
         NEXT_PUBLIC_WS_BASE: ws://localhost:8000/ws/chat
+    environment:
+      VEDNIX_BACKEND_URL: http://backend:8000
     ports: ["3000:3000"]
     depends_on: [backend]
 

@@ -77,11 +77,17 @@ async def _throttle(request: Request, bucket: str) -> None:
 
 
 def _cookie_policy(request: Request) -> tuple[bool, str]:
-    """Use cross-site cookie attributes for HTTPS deployments, retain local Lax."""
+    """Use Lax for same-origin/proxied requests; None+Secure only for cross-site HTTPS."""
+    from urllib.parse import urlsplit
+
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip().lower()
-    origin = request.headers.get("origin", "").lower()
+    origin = request.headers.get("origin", "").strip().lower()
+    forwarded_host = request.headers.get("x-forwarded-host", "").split(",", 1)[0].strip().lower()
+    host = forwarded_host or request.headers.get("host", "").strip().lower()
+    origin_host = urlsplit(origin).netloc.lower() if origin else ""
     secure = request.url.scheme == "https" or forwarded_proto == "https" or origin.startswith("https://")
-    return secure, "none" if secure else "lax"
+    cross_site = bool(origin_host and host and origin_host != host)
+    return secure, ("none" if (secure and cross_site) else "lax")
 
 
 def _set_session_cookies(

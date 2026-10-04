@@ -195,7 +195,7 @@ export function ControlPanel() {
                 aria-label="Select AI provider"
               >
                 <option value="auto">Automatic priority (recommended)</option>
-                {providerOptions.filter((p) => (p.provider === "gemini" || p.provider === "groq") && p.enabled && p.has_key && p.verified && p.status === "connected").map((p) => (
+                {providerOptions.filter((p) => p.enabled && p.has_key && p.verified && p.status === "connected").map((p) => (
                   <option key={p.provider} value={p.provider}>{p.label}</option>
                 ))}
               </select>

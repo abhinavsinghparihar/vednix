@@ -1,9 +1,10 @@
 /**
  * Shared browser API configuration.
  *
- * Local browser development pairs its host with backend :8000. Non-loopback
- * production builds use the deployed Render API by default; NEXT_PUBLIC_API_BASE
- * and NEXT_PUBLIC_WS_BASE remain available for deployment-specific overrides.
+ * Browser HTTP requests default to same-origin `/api/*` (proxied by Next.js
+ * rewrites) so session refresh cookies remain first-party and are not dropped
+ * by third-party cookie restrictions. WebSockets connect to the configured
+ * backend origin with an authenticated token query parameter.
  */
 
 const host = typeof window !== "undefined" ? window.location.hostname : "";
@@ -28,9 +29,12 @@ function isSafeApiBase(value: string): boolean {
 }
 
 const configuredApiBase = isSafeApiBase(rawApiBase) ? rawApiBase : "";
+export const DIRECT_API_BASE = configuredApiBase || (isLoopback ? `http://${apiHost}:8000` : PRODUCTION_API_BASE);
+const useDirectApi = process.env.NEXT_PUBLIC_DIRECT_API === "true";
 
-export const API_BASE = configuredApiBase || (isLoopback ? `http://${apiHost}:8000` : PRODUCTION_API_BASE);
-export const API_BASE_CONFIGURED = Boolean(API_BASE);
+// Empty string in the browser routes `/api/*` through Next.js's same-origin proxy.
+export const API_BASE = typeof window !== "undefined" && !useDirectApi ? "" : DIRECT_API_BASE;
+export const API_BASE_CONFIGURED = Boolean(DIRECT_API_BASE);
 
 function deriveWebSocketUrl(apiBase: string): string {
   if (!apiBase) return "";
@@ -58,5 +62,5 @@ function isSafeWebSocketBase(value: string): boolean {
 }
 const configuredWsBase = isSafeWebSocketBase(rawWsBase) ? rawWsBase : "";
 export const WS_URL = configuredWsBase || (
-  configuredApiBase || isLoopback ? deriveWebSocketUrl(API_BASE) : PRODUCTION_WS_BASE
+  configuredApiBase || isLoopback ? deriveWebSocketUrl(DIRECT_API_BASE) : PRODUCTION_WS_BASE
 );
