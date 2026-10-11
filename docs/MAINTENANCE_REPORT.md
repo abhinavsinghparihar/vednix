@@ -4,7 +4,7 @@ This file records current maintenance guidance for the Vednix provider migration
 
 ## Provider boundary
 
-Gemini and Groq are supported through provider adapters and a server-side router. Official APIs supply model candidates. Task capabilities are confirmed by real, operation-specific requests before a model can be selected. API keys remain encrypted on the backend, and error/status payloads never include saved secrets.
+Groq, OpenAI and the other supported providers are reached through provider adapters and a server-side router. Official APIs supply model candidates. Task capabilities are confirmed by real, operation-specific requests before a model can be selected. API keys remain encrypted on the backend, and error/status payloads never include saved secrets.
 
 ## Operational checks
 
@@ -25,7 +25,7 @@ Mock transport tests are deterministic provider-boundary tests; they do not prov
 
 - Vercel frontend variables: `NEXT_PUBLIC_API_BASE=https://vednix.onrender.com` and `NEXT_PUBLIC_WS_BASE=wss://vednix.onrender.com/ws/chat`.
 - Render CORS must allow `https://vednix.vercel.app` and explicit development origins; do not configure wildcard origins.
-- Use Render secret variables for backend secrets, persistent storage for database/uploads, and the Settings UI for Gemini/Groq keys.
+- Use Render secret variables for backend secrets, persistent storage for database/uploads, and the Settings UI for provider keys.
 - Keep provider keys out of frontend bundles, logs, URLs, and repository files.
 
 See [deployment](DEPLOY_FREE.md), [architecture](ARCHITECTURE.md), and [API](API.md) for details.

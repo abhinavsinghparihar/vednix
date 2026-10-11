@@ -54,7 +54,7 @@ async def test_unavailable_provider_message_not_persisted_and_helpful(core, memo
 
     reply = await collect(session.stream_reply("kuch bhi"))
 
-    assert "No verified Gemini or Groq provider" in reply
+    assert "No verified provider is available" in reply
     assert await memory.message_count(conv.id) == 1  # user turn only
 
 

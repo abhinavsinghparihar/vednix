@@ -14,7 +14,7 @@
 ## Backend
 
 - `backend/api/` — FastAPI REST endpoints and the WebSocket chat transport.
-- `backend/ai_engine/` — Gemini/Groq adapters, model capability data, safe provider errors, and chat engine.
+- `backend/ai_engine/` — provider adapters, model capability data, safe provider errors, and chat engine.
 - `backend/services/providers.py` — encrypted provider-key management and live model validation.
 - `backend/services/resilient_llm.py` — provider/model selection and compatible-provider failover.
 - `backend/agents/` — plugins and optional SearXNG research.

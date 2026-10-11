@@ -1,6 +1,6 @@
 # Docker
 
-The Compose stack runs the Vednix backend and frontend. Gemini/Groq API keys are entered through the application and stored encrypted by the backend; they are not passed to the frontend container.
+The Compose stack runs the Vednix backend and frontend. Provider API keys are entered through the application and stored encrypted by the backend; they are not passed to the frontend container.
 
 ```bash
 # Local workspace

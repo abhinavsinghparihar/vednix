@@ -83,7 +83,7 @@ export default function OnboardingPage() {
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
             {status?.active_provider && status.active_provider !== "unavailable"
               ? `${status.active_provider} is live. Your workspace — chat, knowledge, and memory — is standing by.`
-              : "No chat provider is connected yet. You can configure Gemini or Groq anytime in Settings → AI Providers."}
+              : "No chat provider is connected yet. You can configure a provider anytime in Settings → AI Providers."}
           </p>
           {error && <p className="mt-3 max-w-md text-[12px] text-[#f49a96]">{error}</p>}
           <div className="mt-10">

@@ -389,7 +389,7 @@ const TASK_CAPABILITY: Record<ModelTask, keyof ProviderModelInfo["capabilities"]
 };
 
 function ModelsPanel() {
-  const [provider, setProvider] = useState("gemini");
+  const [provider, setProvider] = useState("groq");
   const [task, setTask] = useState<ModelTask>("text");
   const [catalog, setCatalog] = useState<ProviderCatalogItem[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -464,7 +464,6 @@ function ModelsPanel() {
 
   const row = providers.find((item) => item.provider === provider);
   const providerChoices = catalog.length ? catalog : [
-    { id: "gemini", label: "Google Gemini" },
     { id: "groq", label: "Groq" },
     { id: "openai", label: "OpenAI" },
     { id: "mistral", label: "Mistral" },
@@ -751,7 +750,7 @@ function PrivacyPanel({ reload }: { reload: () => Promise<void> }) {
     <Panel>
       <Card title="Data boundaries" icon={ShieldCheck}>
         <ul className="space-y-1.5 text-[12px] leading-relaxed text-muted">
-          <li>· Provider requests are sent only to the Gemini or Groq account you configure.</li>
+          <li>· Provider requests are sent only to the provider account you configure.</li>
           <li>· Passwords are PBKDF2 digests; API keys are Fernet-encrypted with a server-side secret.</li>
           <li>· Conversation history, uploads, and provider configuration are managed by your Vednix backend.</li>
           <li>· Vednix does not claim offline chat when no provider is reachable.</li>
@@ -809,7 +808,7 @@ function AboutPanel() {
           LangGraph research, orchestrated around an 8-state neural core.
         </p>
         <div className="mt-3 flex flex-wrap gap-1.5">
-          {["Gemini + Groq", "Live model checks", "0 telemetry", "हिंदी · Hinglish · English"].map((t) => (
+          {["Multi-provider", "Live model checks", "0 telemetry", "हिंदी · Hinglish · English"].map((t) => (
             <span key={t} className="glass rounded-lg px-2.5 py-1.5 font-mono text-[10px] text-muted">{t}</span>
           ))}
         </div>

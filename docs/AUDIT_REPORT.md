@@ -4,7 +4,7 @@ This report describes the current Vednix workspace, not historical implementatio
 
 ## Runtime outline
 
-Vednix consists of a Next.js client and a FastAPI backend. Chat uses the existing WebSocket stream; conversations, accounts, uploaded files, and provider metadata are served by backend APIs. Gemini and Groq are the initially supported inference providers.
+Vednix consists of a Next.js client and a FastAPI backend. Chat uses the existing WebSocket stream; conversations, accounts, uploaded files, and provider metadata are served by backend APIs. Groq, OpenAI and the other supported providers supply inference through their official OpenAI-compatible APIs.
 
 ## Provider safety
 

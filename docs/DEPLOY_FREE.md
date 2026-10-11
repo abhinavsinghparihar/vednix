@@ -15,7 +15,7 @@ NEXT_PUBLIC_API_BASE=https://vednix.onrender.com
 NEXT_PUBLIC_WS_BASE=wss://vednix.onrender.com/ws/chat
 ```
 
-The Next.js client reads these at build time. Redeploy after changing them. Never place Gemini/Groq keys, backend auth secrets, or any other credential in `NEXT_PUBLIC_*`.
+The Next.js client reads these at build time. Redeploy after changing them. Never place provider API keys, backend auth secrets, or any other credential in `NEXT_PUBLIC_*`.
 
 ## Render backend
 
@@ -35,13 +35,13 @@ The application adds those local origins and the production Vercel origin to its
 
 Use persistent storage for the database, upload directory, and server secret. The current backend dependencies include SQLite support by default; a Render-managed PostgreSQL database also requires installing the matching async SQLAlchemy driver before setting `VEDNIX_DATABASE_URL`. The default SQLite database and local upload directory are suitable for development or a persistent disk; ephemeral filesystem deployments can lose local files between restarts. Set `VEDNIX_UPLOAD_DIR` to a persistent mount when uploads must survive restarts.
 
-Optional backend settings include `VEDNIX_REDIS_URL` for shared rate limiting, `VEDNIX_AUTH_TOKEN` for an additional bearer-token gate, SearXNG settings for research, and SMTP settings for email login. Use Render's secret environment variable facility for credentials. Gemini and Groq keys are deliberately entered in the authenticated Vednix Settings UI and encrypted by the backend; do not add them to Vercel variables or commit them.
+Optional backend settings include `VEDNIX_REDIS_URL` for shared rate limiting, `VEDNIX_AUTH_TOKEN` for an additional bearer-token gate, SearXNG settings for research, and SMTP settings for email login. Use Render's secret environment variable facility for credentials. Provider keys are deliberately entered in the authenticated Vednix Settings UI and encrypted by the backend; do not add them to Vercel variables or commit them.
 
 ## Verify after deployment
 
 1. Open `https://vednix.onrender.com/api/health` and confirm the service is healthy.
 2. In the browser Network panel, confirm API and WebSocket requests target the configured Render origins—not `localhost`.
-3. Sign in, add a Gemini or Groq key in **Settings → API Keys**, and require a successful provider check before enabling it.
+3. Sign in, add a provider key in **Settings → AI Providers**, and require a successful provider check before enabling it.
 4. Refresh **Settings → AI Models** to discover current models and run the task-specific validation.
 5. Test a text reply, then image routing only with a validated vision-capable model.
 

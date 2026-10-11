@@ -10,7 +10,7 @@ Next.js workspace (Vercel or local)
 FastAPI backend (Render or local)
   ├─ auth/session + explicit credentialed CORS
   ├─ EngineCore → ResilientLLM
-  │    ├─ Gemini adapter → official models.list + compatible chat generation
+  │    ├─ Provider adapters → official model lists + compatible chat generation
   │    └─ Groq adapter   → official /models + compatible chat completions
   ├─ task-specific capability probes, model cache, pre-token failover
   ├─ SQLAlchemy: conversations, users, provider keys, validated model metadata
@@ -22,7 +22,7 @@ FastAPI backend (Render or local)
 
 `backend/ai_engine/cloud_client.py` holds provider adapters and their HTTP handling. `model_catalog.py` normalizes model capabilities; `provider_error.py` converts upstream failures to safe, classified errors. `services/providers.py` is the boundary for provider metadata, encrypted keys, official model discovery, task probes, and cached validation. `services/resilient_llm.py` selects only verified and enabled providers.
 
-Provider setup metadata is a small fixed list containing only Gemini and Groq endpoints/labels. Model identifiers are fetched live. Candidate listings are not equivalent to verification: text, vision, and tool capability flags require successful operation-specific checks. Unsupported tasks remain unavailable unless a real check is implemented. Model data and API keys stay server-side.
+Provider setup metadata is a small fixed list containing only the supported providers' endpoints/labels. Model identifiers are fetched live. Candidate listings are not equivalent to verification: text, vision, and tool capability flags require successful operation-specific checks. Unsupported tasks remain unavailable unless a real check is implemented. Model data and API keys stay server-side.
 
 Automatic chat selects a compatible verified model from the saved priority list. It may fail over to another compatible provider only before any response token is emitted. User-selected provider/model requests remain strict. The router does not fan a request out to every configured model.
 

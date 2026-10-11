@@ -27,9 +27,12 @@ from tests.conftest import FakeLLM
 
 def test_jwt_roundtrip_tamper_and_type():
     secret = b"s" * 48
-    token = issue_access_token(secret, user_id="u1", username="abhinav", role="owner", ttl_seconds=60)
+    token = issue_access_token(
+        secret, user_id="u1", username="abhinav", role="owner", ttl_seconds=60, session_id="s1",
+    )
     claims = verify_access_token(secret, token)
     assert claims["sub"] == "u1" and claims["role"] == "owner"
+    assert claims["sid"] == "s1"  # access tokens are bound to their session
 
     with pytest.raises(TokenError):  # wrong secret ⇒ signature mismatch
         verify_access_token(b"x" * 48, token)
@@ -37,8 +40,31 @@ def test_jwt_roundtrip_tamper_and_type():
         parts = token.split(".")
         verify_access_token(secret, parts[0] + "." + parts[1][:-2] + "xx." + parts[2])
     with pytest.raises(TokenError):  # expired
-        dead = issue_access_token(secret, user_id="u1", username="a", role="owner", ttl_seconds=-5)
+        dead = issue_access_token(
+            secret, user_id="u1", username="a", role="owner", ttl_seconds=-5, session_id="s1",
+        )
         verify_access_token(secret, dead)
+    with pytest.raises(TokenError):  # no session binding ⇒ rejected
+        legacy = issue_access_token(
+            secret, user_id="u1", username="a", role="owner", ttl_seconds=60,
+        )
+        verify_access_token(secret, legacy)
+
+    # A correctly-signed token whose JOSE header was swapped (alg:none games)
+    # must still be rejected: the header is pinned, not assumed.
+    import base64
+    import hashlib
+    import hmac
+    import json
+
+    def _b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    forged_header = _b64(json.dumps({"alg": "none", "typ": "JWT"}).encode())
+    payload = token.split(".")[1]
+    signature = _b64(hmac.new(secret, f"{forged_header}.{payload}".encode(), hashlib.sha256).digest())
+    with pytest.raises(TokenError):
+        verify_access_token(secret, f"{forged_header}.{payload}.{signature}")
 
 
 def test_password_hash_roundtrip_and_wrong():
@@ -165,6 +191,64 @@ def test_validation_rejects_bad_register(settings):
         assert short.status_code == 422  # pydantic min_length
         weak = client.post("/api/auth/register", json={"username": "validname", "password": "short"})
         assert weak.status_code == 422
+
+
+def test_security_headers_are_always_present(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        body = _register(client)
+        for response in (
+            client.get("/api/health"),
+            client.get("/api/conversations", headers={"Authorization": f"Bearer {body['access_token']}"}),
+            client.get("/api/conversations"),  # unauthenticated short-circuit
+        ):
+            assert response.status_code in (200, 401)
+            assert response.headers["x-content-type-options"] == "nosniff"
+            assert response.headers["x-frame-options"] == "DENY"
+            assert response.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+            assert "content-security-policy" in response.headers
+            assert "permissions-policy" in response.headers
+
+
+def test_interactive_api_docs_are_off_by_default(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        assert client.get("/openapi.json").status_code == 404
+        assert client.get("/docs").status_code == 404
+        assert client.get("/redoc").status_code == 404
+
+
+def test_logout_revokes_the_access_token_immediately(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        body = _register(client)
+        access = body["access_token"]
+        assert client.get(
+            "/api/auth/me", headers={"Authorization": f"Bearer {access}"}
+        ).status_code == 200
+        client.post("/api/auth/logout", headers={"X-CSRF-Token": client.cookies.get("vednix_csrf")})
+        # The signature still verifies, but the session it was minted from is
+        # gone — revocation must not wait out the access token's lifetime.
+        assert client.get(
+            "/api/auth/me", headers={"Authorization": f"Bearer {access}"}
+        ).status_code == 401
+
+
+def test_admin_revoke_sessions_ends_that_members_access(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        owner = _register(client, username="owner", password="vednix-pass-1")
+        member = _register(client, username="member", password="vednix-pass-2")
+        owner_auth = {"Authorization": f"Bearer {owner['access_token']}"}
+        member_auth = {"Authorization": f"Bearer {member['access_token']}"}
+
+        # a member can use the API but never the admin console
+        assert client.get("/api/conversations", headers=member_auth).status_code == 200
+        assert client.get("/api/admin/users", headers=member_auth).status_code == 403
+        assert client.get("/api/admin/users", headers=owner_auth).status_code == 200
+
+        users = {row["username"]: row for row in client.get("/api/admin/users", headers=owner_auth).json()["users"]}
+        revoked = client.post(
+            f"/api/admin/users/{users['member']['id']}/revoke-sessions", headers=owner_auth,
+        )
+        assert revoked.status_code == 200
+        assert client.get("/api/conversations", headers=member_auth).status_code == 401
 
 
 # =============================================================================

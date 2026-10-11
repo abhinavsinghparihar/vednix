@@ -41,7 +41,7 @@ export function EnterSection() {
             <span className="text-gold-gradient">you are.</span>
           </h2>
           <p className="mx-auto mt-6 max-w-md text-[15px] leading-relaxed text-muted">
-            Three setup commands. Connect Google Gemini or Groq with a key you control, then work in a multilingual AI workspace.
+            Three setup commands. Connect a provider with a key you control, then work in a multilingual AI workspace.
           </p>
         </RevealInView>
 

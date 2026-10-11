@@ -10,3 +10,18 @@
 docs
 *.md
 !backend/requirements*.txt
+
+# --- secrets and local state must never enter an image layer ---
+# A stray backend/.env (real keys) or a *.patch file would otherwise be baked
+# into the image by `COPY . .`. The app reads configuration from the container
+# environment, so nothing here is needed at build or run time.
+.env
+.env.*
+*.patch
+*.pem
+*.key
+secret.key
+*.sqlite3
+*.sqlite3-*
+*.db
+logs/

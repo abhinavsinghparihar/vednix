@@ -8,6 +8,9 @@ Rule set:
   * ≥1 account exists        → /api/* and /ws/* require a valid access token
                                (`Authorization: Bearer …`; `?token=` fallback
                                for the WS upgrade, browsers can't set headers).
+                               A valid signature alone is NOT enough: the token's
+                               `sid` session must still be live, so logout and
+                               admin "revoke sessions" take effect at once.
   * OPEN_PATHS               → the lock screen's own plumbing: health probe,
                                login/register/refresh, onboarding status (the
                                login page needs it to route), docs.
@@ -76,6 +79,11 @@ class SessionMiddleware:
         if token:
             try:
                 claims = users.resolve_access_token(token)
+                # A valid signature is not enough: the session it was minted
+                # from must still be live (logout / admin revoke-sessions /
+                # expiry all land here, not "after the token's TTL").
+                if not await users.access_session_active(str(claims.get("sid", ""))):
+                    claims = None
             except ValueError:
                 claims = None
         if claims is None:

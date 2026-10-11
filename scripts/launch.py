@@ -142,7 +142,7 @@ def main() -> None:
     if not ready:
         fail("The API did not become ready.", "Check logs/backend.log.")
     open_browser(APP_URL)
-    print(f"\nVednix is running at {APP_URL}\nConfigure a Gemini or Groq key in the provider setup.\nPress Ctrl+C to stop.\n", flush=True)
+    print(f"\nVednix is running at {APP_URL}\nConfigure a provider key in the provider setup.\nPress Ctrl+C to stop.\n", flush=True)
 
     try:
         while all(child.poll() is None for child in children):

@@ -90,7 +90,6 @@ class KnowledgeDocOut(BaseModel):
 
 
 ProviderId = Literal[
-    "gemini",
     "groq",
     "openai",
     "mistral",

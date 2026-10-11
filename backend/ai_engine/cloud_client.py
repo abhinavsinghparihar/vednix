@@ -1,4 +1,4 @@
-"""Server-side adapters for Gemini, Groq, and OpenAI-compatible AI providers.
+"""Server-side adapters for Groq and OpenAI-compatible AI providers.
 
 All providers use OpenAI-compatible model discovery and chat completions over
 HTTPS with Bearer authentication only. Catalog entries are only candidates:
@@ -8,7 +8,6 @@ model as usable.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 import time
@@ -19,7 +18,7 @@ import httpx
 
 _T = TypeVar("_T")
 
-from ai_engine.model_catalog import ModelCapabilities, ModelInfo, normalize_gemini_model
+from ai_engine.model_catalog import ModelCapabilities, ModelInfo
 from ai_engine.provider_error import ProviderError
 from core.logging import get_logger
 
@@ -391,109 +390,6 @@ class OpenAICompatibleClient:
                 self.provider_name, f"Tool capability check failed: {reason}.",
                 category="temporary", retryable=True, model_id=selected,
             ) from exc
-
-
-class GeminiClient(OpenAICompatibleClient):
-    """Gemini adapter: Google-compatible endpoints with Bearer auth only."""
-
-    def __init__(self, api_key: str, model: str, *, timeout: float = 90.0,
-                 client: httpx.AsyncClient | None = None) -> None:
-        super().__init__(
-            api_key, model, provider="gemini", provider_name="Google Gemini",
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-            timeout=timeout, client=client,
-        )
-
-    async def _retry_transient(self, operation: Callable[[], Awaitable[_T]]) -> _T:
-        """Retry one transient Google failure before surfacing it to verification."""
-        for attempt in range(2):
-            try:
-                return await operation()
-            except ProviderError as exc:
-                if not exc.retryable or attempt == 1:
-                    raise
-                # Google can briefly return 5xx while its model service is busy.
-                await asyncio.sleep(0.35)
-        raise AssertionError("Transient retry loop exited unexpectedly.")
-
-    async def probe_text(self, model_id: str) -> float:
-        return await self._retry_transient(
-            lambda: super(GeminiClient, self).probe_text(model_id)
-        )
-
-    async def probe_stream(self, model_id: str, *, images: list[str] | None = None) -> float:
-        return await self._retry_transient(
-            lambda: super(GeminiClient, self).probe_stream(model_id, images=images)
-        )
-
-    async def discover_models(self) -> list[ModelInfo]:
-        return await self._retry_transient(self._discover_models_once)
-
-    async def _discover_models_once(self) -> list[ModelInfo]:
-        rows: list[dict] = []
-        page_token: str | None = None
-        try:
-            while True:
-                params: dict[str, Any] = {}
-                if page_token:
-                    params["pageToken"] = page_token
-                response = await self._client.get("/models", params=params or None)
-                if not 200 <= response.status_code < 300:
-                    raise _provider_error(self.provider_name, response, self._api_key)
-                payload = response.json()
-                if isinstance(payload, dict):
-                    entries = payload.get("models") if "models" in payload else payload.get("data", [])
-                    if isinstance(entries, list):
-                        rows.extend(entries)
-                    page_token = payload.get("nextPageToken")
-                elif isinstance(payload, list):
-                    rows.extend(payload)
-                    page_token = None
-                else:
-                    page_token = None
-                if not page_token:
-                    break
-        except ProviderError:
-            raise
-        except httpx.HTTPError as exc:
-            reason = _redact(exc, self._api_key) or "network error"
-            raise ProviderError(
-                self.provider_name, f"Could not retrieve Google's live model catalog: {reason}.",
-                category="temporary", retryable=True,
-            ) from exc
-        except ValueError as exc:
-            raise ProviderError(self.provider_name, "Google returned invalid model catalog data.") from exc
-
-        models: list[ModelInfo] = []
-        for raw in rows:
-            if not isinstance(raw, dict):
-                continue
-            raw_id = raw.get("baseModelId") or raw.get("id") or raw.get("name")
-            if not raw_id:
-                continue
-            model_id = normalize_gemini_model(str(raw_id))
-            metadata_reason = _non_chat_reason(model_id, raw)
-            if "supportedGenerationMethods" in raw:
-                methods = {str(method).lower() for method in raw.get("supportedGenerationMethods", [])}
-                supports_text = "generatecontent" in methods and metadata_reason is None
-                reason = metadata_reason or (
-                    None if supports_text else "Google does not list generateContent support for this model."
-                )
-            else:
-                supports_text = metadata_reason is None
-                reason = metadata_reason
-            models.append(ModelInfo(
-                id=model_id,
-                provider="gemini",
-                displayName=str(raw.get("displayName") or raw.get("display_name") or raw.get("name") or model_id),
-                capabilities=ModelCapabilities(text=supports_text),
-                contextWindow=_positive_int(raw.get("inputTokenLimit") or raw.get("context_window")),
-                maxOutputTokens=_positive_int(raw.get("outputTokenLimit") or raw.get("max_completion_tokens")),
-                available=False,
-                reason=reason or "Awaiting a live chat and streaming capability check.",
-                checkedCapabilities=("text_metadata",) if supports_text else (),
-            ))
-        return models
 
 
 class GroqClient(OpenAICompatibleClient):
