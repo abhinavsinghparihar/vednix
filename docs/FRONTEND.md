@@ -6,7 +6,7 @@ The frontend is a Next.js App Router application using TypeScript, React, Tailwi
 
 - `/` — product landing page and workspace entry.
 - `/login`, `/signup` — account authentication.
-- `/onboarding` — initial workspace setup and Gemini/Groq provider connection.
+- `/onboarding` — initial workspace setup and provider connection.
 - `/chat` — workspace shell, conversation sidebar, chat stage, composer, and Studio controls.
 - `/settings` — provider keys, live model discovery, task checks, priorities, memory/privacy and account settings.
 - `/profile` — account and session management.

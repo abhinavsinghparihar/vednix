@@ -35,10 +35,63 @@ from memory.service import MemoryService
 from services.file_store import FileStore
 from services.knowledge import KnowledgeService
 from services.onboarding import OnboardingService
-from services.providers import ProviderService, ResilientLLM
+from services.providers import REGISTRY, ProviderService, ResilientLLM
 from services.users import UserService
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = get_logger(__name__)
+
+# --- security response headers (audit SEC8) -----------------------------------
+# Applied outermost so every response carries them — including the 401/429/403
+# short-circuits produced by the inner middlewares.
+_SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
+    ("x-content-type-options", "nosniff"),
+    ("x-frame-options", "DENY"),
+    ("referrer-policy", "strict-origin-when-cross-origin"),
+    # The workspace uses the microphone for voice chat; nothing else is needed.
+    ("permissions-policy", "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()"),
+    # allow-popups keeps OAuth-style redirect flows working.
+    ("cross-origin-opener-policy", "same-origin-allow-popups"),
+    ("x-permitted-cross-domain-policies", "none"),
+)
+# This host serves JSON (and, when explicitly enabled, Swagger UI). A restrictive
+# CSP is defense-in-depth: an injected document here can load nothing remote.
+_API_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
+_HSTS_VALUE = "max-age=63072000; includeSubDomains"  # two years, subdomains included
+
+
+class SecurityHeadersMiddleware:
+    """Attach hardening headers to every HTTP response this app emits."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        secure = scope.get("scheme") == "https"
+
+        async def send_with_headers(message: dict) -> None:
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                names = {name.lower() for name, _ in headers}
+                for name, value in _SECURITY_HEADERS:
+                    if name.encode("latin-1") not in names:
+                        headers.append((name.encode("latin-1"), value.encode("latin-1")))
+                if b"content-security-policy" not in names:
+                    headers.append((b"content-security-policy", _API_CSP.encode("latin-1")))
+                if secure and b"strict-transport-security" not in names:
+                    headers.append((b"strict-transport-security", _HSTS_VALUE.encode("latin-1")))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 def _build_llm(settings: Settings, providers: ProviderService) -> ResilientLLM:
@@ -108,8 +161,8 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         )
         app.state.research = research
         logger.info(
-            "Vednix AI backend ready (providers=Gemini/Groq, fts5=%s, db=%s, uploads=%s)",
-            fts_enabled, settings.database_url, settings.upload_dir,
+            "Vednix AI backend ready (providers=%d registered, fts5=%s, db=%s, uploads=%s)",
+            len(REGISTRY), fts_enabled, settings.database_url, settings.upload_dir,
         )
         try:
             yield
@@ -120,7 +173,16 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             await db_engine.dispose()
             logger.info("Vednix AI backend stopped")
 
-    app = FastAPI(title="Vednix AI", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="Vednix AI",
+        version="0.1.0",
+        lifespan=lifespan,
+        # Interactive docs are an information-disclosure surface: off unless
+        # VEDNIX_API_DOCS=1 is set deliberately.
+        docs_url="/docs" if settings.api_docs else None,
+        redoc_url="/redoc" if settings.api_docs else None,
+        openapi_url="/openapi.json" if settings.api_docs else None,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
@@ -149,6 +211,10 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         if not await request.app.state.rate_limiter.allow(key):
             return JSONResponse({"detail": "Rate limit exceeded"}, status_code=429)
         return await call_next(request)
+
+    # Added last ⇒ outermost: the headers also ride the 401/429/403 responses
+    # that the middlewares above short-circuit with.
+    app.add_middleware(SecurityHeadersMiddleware)
 
     app.include_router(health.router, prefix="/api")
     app.include_router(conversations.router, prefix="/api")

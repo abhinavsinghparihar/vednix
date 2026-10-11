@@ -111,7 +111,7 @@ export function Hero() {
           <Reveal delay={0.24}>
             <p className="mt-7 max-w-md text-[15px] leading-relaxed text-muted">
               Vednix AI is a cinematic chat and research workspace for Hindi, Hinglish,
-              English and beyond. Connect Google Gemini or Groq with your own key, stream
+              English and beyond. Connect a provider with your own key, stream
               replies, and keep your conversations and workspace tools together.
             </p>
           </Reveal>

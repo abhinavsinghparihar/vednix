@@ -75,8 +75,3 @@ class ModelInfo:
         value = asdict(self)
         value["checkedCapabilities"] = list(self.checkedCapabilities)
         return value
-
-
-def normalize_gemini_model(model: str) -> str:
-    """Normalize the resource-name prefix returned by the official Gemini API."""
-    return model.strip().removeprefix("models/")

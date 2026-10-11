@@ -155,7 +155,7 @@ async def test_vision_guard_without_vision_model(core, memory, files_store):
     reply = await collect(session.stream_reply(
         "what's on my screen?",
         attachments=[AttachmentRef(id=row.id, name=row.name, kind=row.kind, size=row.size)],
-        provider="gemini",
+        provider="openai",
     ))
 
     assert "successful image-input check" in reply
@@ -181,7 +181,7 @@ async def test_vision_auto_routes_to_available_vision_model(core, memory, files_
     reply = await collect(session.stream_reply(
         "describe this image",
         attachments=[AttachmentRef(id=row.id, name=row.name, kind=row.kind, size=row.size)],
-        provider="gemini",
+        provider="openai",
     ))
 
     assert "Routed images to `vision-model`" in reply

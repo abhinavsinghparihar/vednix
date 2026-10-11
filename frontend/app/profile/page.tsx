@@ -204,7 +204,7 @@ function ProfileInner() {
                 </span>
               ))}
               {sys && !sys.providers?.some((provider) => provider.chat_available) && (
-                <span className="text-[12px] text-faint">No verified chat provider is ready. Configure Gemini or Groq in Settings.</span>
+                <span className="text-[12px] text-faint">No verified chat provider is ready. Configure a provider in Settings.</span>
               )}
             </div>
           </Section>

@@ -8,7 +8,7 @@ All provider management routes are under `/api/providers`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/providers/catalog` | Small static setup metadata for Gemini and Groq; contains no model catalog or credentials. |
+| GET | `/api/providers/catalog` | Small static setup metadata for the supported providers; contains no model catalog or credentials. |
 | GET | `/api/providers` | Configured-provider status, non-reversible key hint, and priority; never returns saved keys. |
 | PUT | `/api/providers/{provider}/key` | Encrypt and save a key or change a selected text model. Response includes status/hint only. |
 | DELETE | `/api/providers/{provider}/key` | Remove saved key and model checks. |
@@ -16,18 +16,18 @@ All provider management routes are under `/api/providers`.
 | GET | `/api/providers/{provider}/models?task=text&force=false` | Fetch live provider models and return only models validated for `task`. |
 | POST | `/api/providers/{provider}/models/validate` | Validate `{ "model_id": "…", "task": "vision" }`. |
 | POST | `/api/providers/{provider}/toggle` | Enable/disable a provider after successful verification. |
-| PUT | `/api/providers/priority` | Save `{ "order": ["gemini", "groq"] }`. |
+| PUT | `/api/providers/priority` | Save `{ "order": ["groq", "openai"] }`. |
 
 Supported task values are `text`, `vision`, `audio_input`, `audio_output`, `image_generation`, `video`, and `tools`. Capabilities are never inferred from model names. Tasks that do not have an implemented, successful provider probe are returned as unavailable. Model validation is cached server-side for a limited period and can be force-refreshed.
 
-Gemini discovery uses Google's official paginated `models.list` endpoint and its supported-generation-method metadata. Generation is sent through Gemini's OpenAI-compatible chat endpoint. Groq discovery uses its official `/openai/v1/models` endpoint; chat usability is checked through chat completions. Candidate catalog entries are not marked usable until an operation succeeds.
+Every provider is discovered through its official OpenAI-compatible `models` endpoint (for example Groq's `/openai/v1/models`), and chat usability is confirmed with a real chat-completions probe — streaming, vision and tool capabilities each need their own successful check. Candidate catalog entries are not marked usable until the corresponding operation succeeds.
 
 ## Core REST routes
 
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | Service and provider-neutral chat readiness. |
-| GET | `/api/models?provider=gemini&task=text` | Compatible, validated models for the current provider/task. |
+| GET | `/api/models?provider=groq&task=text` | Compatible, validated models for the current provider/task. |
 | GET/POST | `/api/conversations` | List or create conversations. |
 | GET/PATCH/DELETE | `/api/conversations/{id}` | Read, update, or remove a conversation. |
 | POST | `/api/uploads` | Upload files for chat (bounded size/count). |
@@ -53,7 +53,7 @@ Authentication routes are under `/api/auth`; owner administration is under `/api
   "type": "user_message",
   "content": "Explain this image",
   "conversation_id": null,
-  "provider": "gemini",
+  "provider": "groq",
   "model": null,
   "language": "auto",
   "temperature": 0.7,

@@ -9,7 +9,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Vednix AI — The Next Generation AI Workspace",
   description:
-    "Multilingual AI workspace with Gemini and Groq. Hindi, Hinglish, English — your language, your provider.",
+    "Multilingual AI workspace with your choice of provider. Hindi, Hinglish, English — your language, your provider.",
   applicationName: "Vednix AI",
 };
 

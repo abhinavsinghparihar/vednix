@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     dev_reload: bool = False
+    # Interactive API docs (/docs, /redoc, /openapi.json) are OFF by default:
+    # a public schema is free reconnaissance. Set VEDNIX_API_DOCS=1 to enable
+    # them deliberately (local development, or a private network).
+    api_docs: bool = False
     cors_origins: str = (
         "http://localhost:3000,http://127.0.0.1:3000,"
         "http://localhost:3001,http://127.0.0.1:3001"

@@ -1,8 +1,8 @@
 # Vednix AI
 
-**A multilingual AI workspace with live-validated Gemini and Groq providers.** Vednix combines WebSocket-streamed chat, conversation history, file uploads, vision routing, memory, knowledge search, and optional web research in one workspace.
+**A multilingual AI workspace with live-validated multi-provider inference.** Vednix combines WebSocket-streamed chat, conversation history, file uploads, vision routing, memory, knowledge search, and optional web research in one workspace.
 
-Connect Google Gemini or Groq in Settings. Provider keys are stored encrypted by the backend and are never returned to the browser. Models are discovered from official provider APIs and are exposed as usable only after the requested capability passes a live check; there is no large hardcoded model catalog.
+Connect a provider — Groq, OpenAI, Mistral, DeepSeek, OpenRouter, Together, xAI, Cerebras, SambaNova, NVIDIA NIM or Perplexity — in Settings. Provider keys are stored encrypted by the backend and are never returned to the browser. Models are discovered from official provider APIs and are exposed as usable only after the requested capability passes a live check; there is no large hardcoded model catalog.
 
 ## Quick start
 
@@ -47,7 +47,7 @@ Every push and pull request runs the same backend suite and frontend typecheck/b
 
 ## Providers and security
 
-- Initially supported providers: **Google Gemini** and **Groq**.
+- Supported providers: **Groq**, **OpenAI**, **Mistral**, **DeepSeek**, **OpenRouter**, **Together**, **xAI**, **Cerebras**, **SambaNova**, **NVIDIA NIM** and **Perplexity** — all through their official OpenAI-compatible APIs, with keys encrypted server-side.
 - Model lists and metadata come from official provider APIs; every usable text, vision, or tools model is validated against that operation.
 - Automatic routing selects a compatible provider/model by saved priority and fails over only before the first response token. An explicitly selected provider stays strict.
 - API keys are encrypted at rest on the server. They are not put in `NEXT_PUBLIC_*`, browser storage, URLs, or API responses.

@@ -13,7 +13,7 @@ const ITEMS = [
   {
     icon: Cpu,
     title: "Provider-powered intelligence",
-    body: "Connect Google Gemini or Groq, choose a verified model, and stream replies in Hindi, Hinglish or English.",
+    body: "Connect Groq, OpenAI or another provider, choose a verified model, and stream replies in Hindi, Hinglish or English.",
     tag: "engine.stream_reply",
   },
   {

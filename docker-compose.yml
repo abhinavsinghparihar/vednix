@@ -2,7 +2,7 @@
 #   docker compose up                          → API + frontend
 #   docker compose --profile research up       → adds SearXNG
 #   docker compose --profile scale up          → adds Postgres + Redis
-# Gemini/Groq keys are entered in Settings and encrypted in the backend DB.
+# Provider keys are entered in Settings and encrypted in the backend DB.
 services:
   backend:
     build: ./backend

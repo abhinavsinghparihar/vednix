@@ -42,7 +42,6 @@ export interface OnboardingStatus {
 }
 
 export type ProviderId =
-  | "gemini"
   | "groq"
   | "openai"
   | "mistral"

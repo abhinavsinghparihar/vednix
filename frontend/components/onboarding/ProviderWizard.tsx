@@ -194,7 +194,7 @@ export function ProviderWizard({ onDone, onExit }: { onDone: () => void; onExit:
       <button onClick={onExit} className="mb-4 text-[11px] text-faint transition-colors hover:text-gold-bright">
         ← Back to welcome
       </button>
-      <StepTitle kicker="Secure provider setup" title="Choose an AI provider" sub="Connect Gemini or Groq with a server-encrypted key. Model lists come from official live APIs and are checked before use." />
+      <StepTitle kicker="Secure provider setup" title="Choose an AI provider" sub="Connect a provider with a server-encrypted key. Model lists come from official live APIs and are checked before use." />
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-gold" /></div>
       ) : (

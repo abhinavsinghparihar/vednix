@@ -178,7 +178,7 @@ export default function SignupPage() {
         />
 
         <AuthCheck id="terms" checked={terms} onChange={setTerms}>
-          I understand that chat content and selected attachments may be sent to the Gemini or Groq provider I choose, and that saved provider keys are encrypted by this backend.
+          I understand that chat content and selected attachments may be sent to the AI provider I choose, and that saved provider keys are encrypted by this backend.
         </AuthCheck>
 
         <AuthError message={error} />

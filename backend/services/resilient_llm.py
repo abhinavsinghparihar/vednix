@@ -1,11 +1,11 @@
-"""Capability-aware Gemini/Groq chat routing with pre-token failover."""
+"""Capability-aware multi-provider chat routing with pre-token failover."""
 
 from __future__ import annotations
 
 from typing import AsyncIterator
 
 from ai_engine.cloud_client import OpenAICompatibleClient
-from ai_engine.model_catalog import ModelInfo, ModelTask, normalize_gemini_model
+from ai_engine.model_catalog import ModelInfo, ModelTask
 from ai_engine.provider_error import ProviderError
 from core.logging import get_logger
 from memory.models import ProviderKey
@@ -95,7 +95,7 @@ class ResilientLLM:
 
     async def unavailable_message(self, provider: str | None = None) -> str:
         if provider and provider not in REGISTRY:
-            return f"Unknown provider '{provider}'. Choose Gemini or Groq in Settings."
+            return f"Unknown provider '{provider}'. Choose a provider in Settings."
         if provider:
             spec = REGISTRY[provider]
             row = await self._service._row(provider)
@@ -111,14 +111,14 @@ class ResilientLLM:
             return f"{spec.label} has no recently validated model for this task. Refresh and validate its model list."
         rows = await self._service.list_configured()
         if not rows:
-            return "No AI provider is configured. Add a Gemini or Groq API key in Settings → AI Providers."
+            return "No AI provider is configured. Add a provider API key in Settings → AI Providers."
         if not any(row["verified"] and row["enabled"] for row in rows):
             failed = next((row for row in rows if row["status"] == "failed" and row["status_detail"]), None)
             if failed:
                 label = REGISTRY.get(failed["provider"], None)
                 prefix = f"{label.label}: " if label else ""
                 return prefix + failed["status_detail"]
-            return "No provider is verified and enabled. Test a Gemini or Groq connection in Settings → AI Providers."
+            return "No provider is verified and enabled. Test a provider connection in Settings → AI Providers."
         return "No verified provider has a usable model for this request. Refresh model validation in Settings → AI Providers."
 
     async def _row_for(self, provider: str) -> ProviderKey | None:
@@ -132,7 +132,7 @@ class ResilientLLM:
         *,
         force: bool = False,
     ) -> ModelInfo:
-        model_id = normalize_gemini_model(model_id) if provider == "gemini" else model_id.strip()
+        model_id = model_id.strip()
         if not force:
             cached = await self._service.get_validated_model(provider, model_id, task=task)
             if cached is not None:
@@ -185,8 +185,6 @@ class ResilientLLM:
         required = self._tasks(task)
         row = await self._row_for(provider)
         desired = (requested or (row.model_override if row else None) or client.model or "").strip()
-        if provider == "gemini" and desired:
-            desired = normalize_gemini_model(desired)
 
         async def check_model(model_id: str) -> str:
             for capability in required:
@@ -489,7 +487,7 @@ class ResilientLLM:
         if detail:
             message += " " + detail
         else:
-            message += " Add and verify a Gemini or Groq API key in Settings → AI Providers."
+            message += " Add and verify a provider API key in Settings → AI Providers."
         raise ProviderError("Vednix", message, category="provider_error", retryable=bool(errors))
 
     async def aclose(self) -> None:

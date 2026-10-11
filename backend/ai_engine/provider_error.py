@@ -58,7 +58,7 @@ class ProviderError(RuntimeError):
     def from_http(
         cls, provider: str, status: int, detail: str, *, model_id: str | None = None,
     ) -> "ProviderError":
-        """Classify common Gemini/OpenAI-compatible errors without returning raw bodies."""
+        """Classify common OpenAI-compatible provider errors without returning raw bodies."""
         hint = " ".join(str(detail or "").lower().replace("_", " ").split())
 
         if any(term in hint for term in ("invalid api key", "api key not valid", "api_key_invalid", "key is invalid")):

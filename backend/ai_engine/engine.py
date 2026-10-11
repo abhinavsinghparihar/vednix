@@ -206,9 +206,9 @@ class EngineSession:
                     try:
                         message = await unavailable(selected_provider)
                     except Exception:
-                        message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
+                        message = "No verified provider is available. Connect one in Settings → AI Providers."
                 else:
-                    message = "No verified Gemini or Groq provider is available. Check Settings → AI Providers."
+                    message = "No verified provider is available. Connect one in Settings → AI Providers."
                 self.last_error = {"code": "PROVIDER_UNAVAILABLE", "message": message}
             yield message
             return

@@ -18,8 +18,8 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ai_engine.cloud_client import GeminiClient, GroqClient, OpenAICompatibleClient
-from ai_engine.model_catalog import ModelCapabilities, ModelInfo, ModelTask, normalize_gemini_model
+from ai_engine.cloud_client import GroqClient, OpenAICompatibleClient
+from ai_engine.model_catalog import ModelCapabilities, ModelInfo, ModelTask
 from ai_engine.provider_error import ProviderError
 from core.crypto import KeyVault
 from core.logging import get_logger
@@ -53,15 +53,6 @@ class ProviderSpec:
 
 ENGINE_LABEL = "Vednix AI"
 REGISTRY: dict[str, ProviderSpec] = {
-    "gemini": ProviderSpec(
-        id="gemini",
-        label="Google Gemini",
-        kind="gemini",
-        base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-        key_url="https://aistudio.google.com/apikey",
-        docs_url="https://ai.google.dev/gemini-api/docs",
-        blurb="Connect Gemini with a key stored securely on this server.",
-    ),
     "groq": ProviderSpec(
         id="groq",
         label="Groq",
@@ -282,8 +273,6 @@ class ProviderService:
 
         key = api_key.strip()
         selected_model = (model or "").strip() or None
-        if selected_model and provider == "gemini":
-            selected_model = normalize_gemini_model(selected_model)
         async with self._sessions() as db:
             row = (
                 await db.execute(select(ProviderKey).where(ProviderKey.provider == provider))
@@ -398,8 +387,6 @@ class ProviderService:
             return None
         model = row.model_override or ""
         kwargs = {"timeout": settings.llm_request_timeout}
-        if provider == "gemini":
-            return GeminiClient(api_key, model, **kwargs)
         if provider == "groq":
             return GroqClient(api_key, model, **kwargs)
         return OpenAICompatibleClient(
@@ -677,7 +664,7 @@ class ProviderService:
             returned: list[ModelInfo] = []
             rejected: list[dict[str, Any]] = []
             if task in {"text", "vision", "document_input", "tools"}:
-                preferred = normalize_gemini_model(row.model_override or "") if provider == "gemini" else (row.model_override or "")
+                preferred = row.model_override or ""
                 indexed = list(enumerate(candidates))
                 indexed.sort(key=lambda pair: (pair[1].id != preferred, pair[0]))
                 for _index, candidate in indexed:
@@ -726,7 +713,7 @@ class ProviderService:
             raise ValueError(f"Unknown provider '{provider}'.")
         if task not in _SUPPORTED_TASKS:
             raise ValueError(f"Unknown model task '{task}'.")
-        model_id = normalize_gemini_model(model_id) if provider == "gemini" else model_id.strip()
+        model_id = model_id.strip()
         row = await self._row(provider)
         if row is None or not self._decrypt(row):
             raise ValueError(f"{REGISTRY[provider].label} is not configured with a usable API key.")
@@ -776,7 +763,7 @@ class ProviderService:
             text_candidates = [candidate for candidate in candidates if candidate.capabilities.text]
             ordered_candidates: list[ModelInfo] = []
             if row.model_override:
-                selected = normalize_gemini_model(row.model_override) if provider == "gemini" else row.model_override
+                selected = row.model_override
                 preferred = next((item for item in candidates if item.id == selected), None)
                 if preferred is None:
                     detail = "The selected model is not present in the provider's live model catalog. Trying another listed text model."
@@ -784,18 +771,20 @@ class ProviderService:
                     ordered_candidates.append(preferred)
                 else:
                     detail = preferred.reason or "The selected model does not advertise text generation. Trying another listed text model."
-            if not row.model_override or provider == "gemini":
-                ordered_candidates.extend(
-                    candidate for candidate in text_candidates
-                    if candidate.id not in {item.id for item in ordered_candidates}
-                )
+            # The selected model is always probed first; the remaining text
+            # models follow so a model-specific failure can fall back instead
+            # of failing the whole provider (the detail text above promises it).
+            ordered_candidates.extend(
+                candidate for candidate in text_candidates
+                if candidate.id not in {item.id for item in ordered_candidates}
+            )
 
             transient_errors: list[ProviderError] = []
             for candidate in ordered_candidates:
                 try:
                     result = await self._probe_candidate(client, candidate, "text", force=True)
                 except ProviderError as exc:
-                    if exc.authentication_error or (exc.retryable and provider != "gemini"):
+                    if exc.authentication_error:
                         raise
                     if exc.retryable:
                         transient_errors.append(exc)

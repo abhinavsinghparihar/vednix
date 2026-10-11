@@ -80,11 +80,11 @@ class UserService:
 
     # --- helpers ------------------------------------------------------------
 
-    def _sign_access(self, user: User) -> tuple[str, int]:
+    def _sign_access(self, user: User, session_id: str) -> tuple[str, int]:
         return (
             issue_access_token(
                 self._secret, user_id=user.id, username=user.username,
-                role=user.role, ttl_seconds=ACCESS_TTL,
+                role=user.role, ttl_seconds=ACCESS_TTL, session_id=session_id,
             ),
             ACCESS_TTL,
         )
@@ -230,7 +230,7 @@ class UserService:
         )
         db.add(session)
         await db.commit()
-        access, ttl_access = self._sign_access(user)
+        access, ttl_access = self._sign_access(user, session.id)
         return IssuedTokens(access, refresh, ttl_access, session.id)
 
     async def issue_session_for(
@@ -272,13 +272,26 @@ class UserService:
                 session.expires_at = now + REFRESH_TTL_REMEMBER
             user = (await db.execute(select(User).where(User.id == session.user_id))).scalar_one()
             await db.commit()
-            access, ttl_access = self._sign_access(user)
+            access, ttl_access = self._sign_access(user, session.id)
             return IssuedTokens(access, new_refresh, ttl_access, session.id)
 
     # --- access-token resolution (middleware seam) ---------------------------------
 
     def resolve_access_token(self, token: str) -> dict:
         return verify_access_token(self._secret, token)
+
+    async def access_session_active(self, session_id: str) -> bool:
+        """True only while the refresh session an access token was minted from
+        still exists, is unrevoked and unexpired. Lets logout and the admin
+        revoke-sessions action take effect immediately instead of after the
+        access token's remaining lifetime."""
+        if not session_id:
+            return False
+        async with self._sessions() as db:
+            session = await db.get(AuthSession, session_id)
+            if session is None:
+                return False
+            return not session.revoked and _aware(session.expires_at) > datetime.now(timezone.utc)
 
     async def get_user(self, user_id: str) -> User | None:
         async with self._sessions() as db:
