@@ -44,7 +44,11 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 ACCESS_TTL = 20 * 60                    # 20 minutes
 REFRESH_TTL = timedelta(hours=12)       # session ends when the OS day does…
-REFRESH_TTL_REMEMBER = timedelta(days=30)  # …unless "remember me"
+# …unless the device chose "stay signed in". The refresh token rotates and
+# slides on every use, so an actively used device never has to sign in again;
+# this ceiling only bounds a device that is abandoned for years. Operators can
+# tune it with VEDNIX_SESSION_DAYS.
+REFRESH_TTL_REMEMBER = timedelta(days=3650)
 
 MAX_FAILED_ATTEMPTS = 5          # then a short lockout
 LOCKOUT = timedelta(minutes=5)
@@ -69,14 +73,23 @@ class IssuedTokens:
 
 
 class UserService:
-    def __init__(self, sessions: async_sessionmaker[AsyncSession], secret: bytes) -> None:
+    def __init__(
+        self, sessions: async_sessionmaker[AsyncSession], secret: bytes,
+        *, remember_ttl: timedelta | None = None,
+    ) -> None:
         self._sessions = sessions
         self._secret = secret
+        self._remember_ttl = remember_ttl if remember_ttl and remember_ttl.total_seconds() > 0 else REFRESH_TTL_REMEMBER
         # brute-force damping: ip → (failed count, lockout until)
         self._failures: dict[str, tuple[int, datetime]] = {}
         # auth_enabled() runs on EVERY request (middleware) — cache the count,
         # invalidate on register. No user-delete endpoint exists, so this is exact.
         self._count_cache: int | None = None
+
+    @property
+    def remember_ttl(self) -> timedelta:
+        """Lifetime applied to a device that chose "stay signed in"."""
+        return self._remember_ttl
 
     # --- helpers ------------------------------------------------------------
 
@@ -222,7 +235,7 @@ class UserService:
         self, db: AsyncSession, user: User, *, remember: bool, device_label: str,
     ) -> IssuedTokens:
         refresh = new_refresh_token()
-        ttl = REFRESH_TTL_REMEMBER if remember else REFRESH_TTL
+        ttl = self._remember_ttl if remember else REFRESH_TTL
         session = AuthSession(
             user_id=user.id, refresh_digest=refresh_digest(refresh),
             device_label=device_label[:160] or "This device",
@@ -267,9 +280,10 @@ class UserService:
             session.last_seen_at = now
             if device_label:
                 session.device_label = device_label[:160]
-            # sliding renewal on remembered sessions only
+            # sliding renewal on remembered sessions only: an active device
+            # keeps pushing its own expiry out, so it never signs itself out
             if session.remember:
-                session.expires_at = now + REFRESH_TTL_REMEMBER
+                session.expires_at = now + self._remember_ttl
             user = (await db.execute(select(User).where(User.id == session.user_id))).scalar_one()
             await db.commit()
             access, ttl_access = self._sign_access(user, session.id)

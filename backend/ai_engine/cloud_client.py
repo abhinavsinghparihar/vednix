@@ -114,7 +114,9 @@ class OpenAICompatibleClient:
         self._api_key = api_key
         self.model = model
         self.base_url = base_url.rstrip("/")
-        headers = {"Authorization": f"Bearer {api_key}", **(extra_headers or {})}
+        # Keyless adapters (the free-use path) must not send an empty bearer
+        # credential: some gateways reject `Authorization: Bearer ` outright.
+        headers = {**({"Authorization": f"Bearer {api_key}"} if api_key else {}), **(extra_headers or {})}
         self._client = client or httpx.AsyncClient(
             base_url=self.base_url,
             timeout=httpx.Timeout(timeout, connect=8.0),

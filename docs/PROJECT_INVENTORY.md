@@ -18,7 +18,8 @@
 - `backend/services/providers.py` — encrypted provider-key management and live model validation.
 - `backend/services/resilient_llm.py` — provider/model selection and compatible-provider failover.
 - `backend/agents/` — plugins and optional SearXNG research.
-- `backend/core/` — encryption, auth, sessions, rate limits, and logging.
+- `backend/core/` — encryption, auth, sessions, rate limits, logging, and key-format/placeholder validation (`key_validation.py`).
+- `backend/scripts/import_keys.py` — the supported batch path for getting provider keys into the encrypted vault (never into source).
 - `backend/memory/` — SQLAlchemy models, database initialization, conversations, and memory.
 - `backend/services/` — users, onboarding, uploads, knowledge, and provider services.
 - `backend/tests/` — unit and integration regressions.
@@ -26,7 +27,7 @@
 
 ## Root and local/generated files
 
-- `scripts/launch.py`, `start.bat`, `start.sh`, `docker-compose.yml`, `README.md`, and `docs/` — launch, deployment, and project guidance.
-- `.github/workflows/ci.yml` — runs the backend suite and the frontend typecheck/build on pushes and pull requests.
+- `scripts/launch.py`, `scripts/scan_secrets.py`, `start.bat`, `start.sh`, `docker-compose.yml`, `README.md`, and `docs/` — launch, secret scanning, deployment, and project guidance.
+- `.github/workflows/ci.yml` — runs the secret scan, the backend suite, and the frontend typecheck/build on pushes and pull requests.
 - Never commit credentials, encrypted-key databases, server secret files, logs, `node_modules`, `.next`, virtual environments, or Python cache files.
 - `.env.example` files contain placeholders only. Real provider keys are entered in Settings and remain server-side.

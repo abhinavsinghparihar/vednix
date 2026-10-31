@@ -17,8 +17,15 @@ All provider management routes are under `/api/providers`.
 | POST | `/api/providers/{provider}/models/validate` | Validate `{ "model_id": "…", "task": "vision" }`. |
 | POST | `/api/providers/{provider}/toggle` | Enable/disable a provider after successful verification. |
 | PUT | `/api/providers/priority` | Save `{ "order": ["groq", "openai"] }`. |
+| POST | `/api/providers/free/enable` | Turn on the keyless free tier. No credential is stored; the response is a live verification result (`connected`, `verification_model`, `detail`). |
 
 Supported task values are `text`, `vision`, `audio_input`, `audio_output`, `image_generation`, `video`, and `tools`. Capabilities are never inferred from model names. Tasks that do not have an implemented, successful provider probe are returned as unavailable. Model validation is cached server-side for a limited period and can be force-refreshed.
+
+`free` is the only provider whose catalog entry has `"needs_key": false` and
+`"free": true`. Its endpoint, candidate models and optional operator token come
+from `VEDNIX_FREE_USE_*` environment settings; it is last in routing priority and
+subject to `VEDNIX_FREE_USE_REQUESTS_PER_HOUR`. It still passes a real completion
+and streaming probe before it can answer, exactly like a paid provider.
 
 Every provider is discovered through its official OpenAI-compatible `models` endpoint (for example Groq's `/openai/v1/models`), and chat usability is confirmed with a real chat-completions probe — streaming, vision and tool capabilities each need their own successful check. Candidate catalog entries are not marked usable until the corresponding operation succeeds.
 
@@ -43,6 +50,12 @@ Every provider is discovered through its official OpenAI-compatible `models` end
 | POST | `/api/onboarding/wipe-data` | Remove user conversation and memory data. |
 
 Authentication routes are under `/api/auth`; owner administration is under `/api/admin`.
+
+Device sessions use a short-lived (20 minute) access token in the `Authorization`
+header plus an httpOnly refresh cookie that rotates on every use. Sessions created
+with `remember: true` slide forward and are bounded by `VEDNIX_SESSION_DAYS`
+(default 3650 days), so a signed-in device stays signed in until it explicitly
+signs out or is revoked.
 
 ## WebSocket chat — `/ws/chat`
 

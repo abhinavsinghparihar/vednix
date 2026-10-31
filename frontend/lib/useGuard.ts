@@ -27,7 +27,10 @@ export function useRouteGuard(opts: { requireAuth: boolean }): "loading" | "ok" 
 
   useEffect(() => {
     let live = true;
-    void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts = 0;
+
+    const run = async () => {
       const status = await bootstrap();
       if (!live) return;
       // unreachable backend sentinel (see store/auth.bootstrap)
@@ -42,6 +45,15 @@ export function useRouteGuard(opts: { requireAuth: boolean }): "loading" | "ok" 
       }
       const { session } = useAuth.getState();
       const signedIn = session === "authed";
+      if (session === "unknown") {
+        // Backend reachable, silent refresh hiccuped. Never sign the device
+        // out for that: retry in the background and hold the splash.
+        if (attempts < 20) {
+          attempts += 1;
+          timer = setTimeout(() => void run(), 2500);
+        }
+        return;
+      }
       if (opts.requireAuth && !signedIn) {
         router.replace(`/login?next=${encodeURIComponent(pathname)}`);
         return;
@@ -52,9 +64,12 @@ export function useRouteGuard(opts: { requireAuth: boolean }): "loading" | "ok" 
         return;
       }
       setState("ok");
-    })();
+    };
+
+    void run();
     return () => {
       live = false;
+      if (timer) clearTimeout(timer);
     };
     // bootstrap identity is stable (zustand); opts are literals per page
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowRight, ArrowUpRight, CheckCircle2, ChevronLeft, KeyRound, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { ArrowRight, ArrowUpRight, CheckCircle2, ChevronLeft, KeyRound, Loader2, ShieldCheck, Sparkles, XCircle } from "lucide-react";
 import { providerApi, type ProviderCatalogItem, type ProviderConfig, type VerifyResult } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
 import { Button } from "@/components/ui/primitives";
@@ -10,12 +10,13 @@ import { cn, EASE_CURVE } from "@/lib/utils";
 import { StepTitle } from "./shared";
 
 function ProviderSetup({
-  provider, configured, onBack, onConnected,
+  provider, configured, onBack, onConnected, onFree,
 }: {
   provider: ProviderCatalogItem;
   configured?: ProviderConfig;
   onBack: () => void;
   onConnected: () => void;
+  onFree: () => void;
 }) {
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -105,6 +106,15 @@ function ProviderSetup({
             <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-gold" />
             The key is sent once to this backend, encrypted at rest, and never returned to the browser or stored in browser storage.
           </p>
+          {/* The free option sits exactly where the decision happens: next to
+              the empty key field. */}
+          <div className="mt-3 flex items-center gap-2 rounded-xl border border-gold/15 bg-gold/[0.04] px-3 py-2">
+            <Sparkles className="h-3.5 w-3.5 shrink-0 text-gold" />
+            <p className="min-w-0 flex-1 text-[11px] leading-snug text-muted">
+              No key yet? Continue with the shared free tier — no account, nothing stored.
+            </p>
+            <Button variant="ghost" onClick={onFree} disabled={busy}>Free use</Button>
+          </div>
           <div className="mt-4 flex justify-end">
             <Button variant="primary" onClick={() => void verify()} disabled={busy || (!key.trim() && !configured?.has_key)}>
               {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <>{key.trim() ? (configured?.has_key ? "Replace key & verify" : "Save securely & verify") : (configured?.has_key ? "Verify saved key" : "Save securely & verify")} <ArrowRight className="h-4 w-4" /></>}
@@ -169,6 +179,30 @@ export function ProviderWizard({ onDone, onExit }: { onDone: () => void; onExit:
   const [configured, setConfigured] = useState<ProviderConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [active, setActive] = useState<ProviderCatalogItem | null>(null);
+  const [freeBusy, setFreeBusy] = useState(false);
+  const [freeError, setFreeError] = useState<string | null>(null);
+
+  const freeProvider = catalog.find((provider) => provider.free);
+  const freeReady = configured.some((row) => row.provider === freeProvider?.id && row.verified);
+  const paidCatalog = catalog.filter((provider) => !provider.free);
+
+  const useFree = async () => {
+    if (freeBusy) return;
+    setFreeBusy(true);
+    setFreeError(null);
+    try {
+      const result = await providerApi.enableFree();
+      if (result.connected) {
+        await onDone();
+        return;
+      }
+      setFreeError(result.detail || "The free tier did not answer. Add your own provider key instead.");
+    } catch (err) {
+      setFreeError(err instanceof ApiError ? err.message : "Could not reach the free tier. Add your own provider key instead.");
+    } finally {
+      setFreeBusy(false);
+    }
+  };
 
   useEffect(() => {
     void Promise.all([providerApi.catalog(), providerApi.configured()])
@@ -186,6 +220,7 @@ export function ProviderWizard({ onDone, onExit }: { onDone: () => void; onExit:
       configured={configured.find((item) => item.provider === active.id)}
       onBack={() => setActive(null)}
       onConnected={onDone}
+      onFree={() => void useFree()}
     />;
   }
 
@@ -194,12 +229,40 @@ export function ProviderWizard({ onDone, onExit }: { onDone: () => void; onExit:
       <button onClick={onExit} className="mb-4 text-[11px] text-faint transition-colors hover:text-gold-bright">
         ← Back to welcome
       </button>
-      <StepTitle kicker="Secure provider setup" title="Choose an AI provider" sub="Connect a provider with a server-encrypted key. Model lists come from official live APIs and are checked before use." />
+      <StepTitle kicker="Secure provider setup" title="Choose an AI provider" sub="Connect a provider with a server-encrypted key — or start instantly on the keyless free tier. Model lists come from live APIs and are checked before use." />
+      {freeProvider && (
+        <motion.button
+          onClick={() => void useFree()}
+          disabled={freeBusy}
+          className="glass mb-3 flex w-full items-center gap-4 rounded-2xl border-gold/25 bg-gold/[0.04] p-5 text-left transition-colors hover:border-gold/45 hover:bg-gold/[0.07] disabled:opacity-70"
+          initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+          whileHover={{ y: -1 }} whileTap={{ scale: 0.99 }}
+        >
+          <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-gold/30 bg-gold/10">
+            {freeBusy ? <Loader2 className="h-5 w-5 animate-spin text-gold" /> : <Sparkles className="h-5 w-5 text-gold-bright" />}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-display text-base font-bold text-cream">
+              Use Vednix Free — no API key
+            </span>
+            <span className="mt-1 block text-[11px] leading-snug text-faint">
+              Shared best-effort capacity, no account and nothing stored. Your own key always takes priority if you add one later.
+            </span>
+            {freeError && <span role="alert" className="mt-1 block text-[11px] text-[#f49a96]">{freeError}</span>}
+          </span>
+          <span className={cn(
+            "rounded-full border px-2.5 py-1 text-[10px]",
+            freeReady ? "border-emerald-400/25 bg-emerald-400/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-faint",
+          )}>
+            {freeReady ? "On" : "No key needed"}
+          </span>
+        </motion.button>
+      )}
       {loading ? (
         <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-gold" /></div>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
-          {catalog.map((provider, index) => (
+          {paidCatalog.map((provider, index) => (
             <motion.button
               key={provider.id}
               onClick={() => setActive(provider)}

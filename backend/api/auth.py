@@ -50,7 +50,7 @@ async def csrf_bootstrap(request: Request, response: Response) -> dict:
         token = new_csrf_token()
         secure, same_site = _cookie_policy(request)
         response.set_cookie(
-            CSRF_COOKIE, token, max_age=30 * 24 * 3600, httponly=False,
+            CSRF_COOKIE, token, max_age=_session_max_age(request, True), httponly=False,
             secure=secure, samesite=same_site, path="/",
         )
     return {"csrf_token": token}
@@ -90,10 +90,21 @@ def _cookie_policy(request: Request) -> tuple[bool, str]:
     return secure, ("none" if (secure and cross_site) else "lax")
 
 
+def _session_max_age(request: Request, remember: bool) -> int:
+    """Cookie lifetime for the refresh credential, matching the server-side
+    session TTL. A remembered device gets the long, sliding lifetime so it
+    stays signed in until it explicitly signs out."""
+    if not remember:
+        return 12 * 3600
+    settings = getattr(request.app.state, "settings", None)
+    days = int(getattr(settings, "session_days", 3650) or 3650)
+    return max(3600, days * 24 * 3600)
+
+
 def _set_session_cookies(
     response: Response, tokens: IssuedTokens, *, remember: bool, request: Request,
 ) -> str:
-    max_age = (30 * 24 * 3600) if remember else (12 * 3600)
+    max_age = _session_max_age(request, remember)
     secure, same_site = _cookie_policy(request)
     csrf_token = new_csrf_token()
     response.set_cookie(

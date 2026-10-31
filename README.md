@@ -2,7 +2,7 @@
 
 **A multilingual AI workspace with live-validated multi-provider inference.** Vednix combines WebSocket-streamed chat, conversation history, file uploads, vision routing, memory, knowledge search, and optional web research in one workspace.
 
-Connect a provider — Groq, OpenAI, Mistral, DeepSeek, OpenRouter, Together, xAI, Cerebras, SambaNova, NVIDIA NIM or Perplexity — in Settings. Provider keys are stored encrypted by the backend and are never returned to the browser. Models are discovered from official provider APIs and are exposed as usable only after the requested capability passes a live check; there is no large hardcoded model catalog.
+Connect a provider — Groq, OpenAI, Mistral, DeepSeek, OpenRouter, Together, xAI, Cerebras, SambaNova, NVIDIA NIM or Perplexity — in Settings, or start with **Free use** next to the API-key field and skip keys entirely. Provider keys are stored encrypted by the backend and are never returned to the browser. Models are discovered from official provider APIs and are exposed as usable only after the requested capability passes a live check; there is no large hardcoded model catalog.
 
 ## Quick start
 
@@ -51,6 +51,9 @@ Every push and pull request runs the same backend suite and frontend typecheck/b
 - Model lists and metadata come from official provider APIs; every usable text, vision, or tools model is validated against that operation.
 - Automatic routing selects a compatible provider/model by saved priority and fails over only before the first response token. An explicitly selected provider stays strict.
 - API keys are encrypted at rest on the server. They are not put in `NEXT_PUBLIC_*`, browser storage, URLs, or API responses.
+- **No credential in source:** batch imports go through `backend/scripts/import_keys.py` (validated, encrypted, never echoed), and `scripts/scan_secrets.py` fails CI if a key-shaped string ever lands in a tracked file. See [secret handling](docs/SECRETS.md).
+- **Free use** is keyless: a shared, best-effort tier configured by `VEDNIX_FREE_USE_*`, live-verified before it can answer, budgeted per hour, and always last in routing priority behind your own keys.
+- **Stay signed in:** a device that signs in once keeps a sliding, httpOnly session (`VEDNIX_SESSION_DAYS`, default ten years) until it explicitly signs out or is revoked. Transient network failures never sign a device out.
 - CORS uses an exact credentialed allowlist. `https://vednix.vercel.app` and localhost development origins are allowed; wildcards are rejected.
 - Chat and attachments remain associated with the existing Vednix account/session and backend. Provider data handling is subject to the provider account's terms.
 
@@ -73,6 +76,8 @@ Set a persistent production database and upload volume as appropriate for the ch
 
 ## Documentation
 
+- [Secret handling](docs/SECRETS.md)
+- [API key audit](docs/API_KEY_AUDIT.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [API reference](docs/API.md)
 - [Frontend guide](docs/FRONTEND.md)

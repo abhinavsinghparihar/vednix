@@ -61,41 +61,76 @@ export interface RefreshResult {
   user?: Record<string, unknown>;
   expiresIn?: number;
   csrfToken?: string;
+  /** The backend was unreachable or hiccuped — this is NOT a sign-out. */
+  transient?: boolean;
 }
 
-/** Single-flight refresh: concurrent callers share one network attempt. */
+type AttemptResult = RefreshResult & { retryable?: boolean; authFailed?: boolean };
+
+async function performRefresh(): Promise<AttemptResult> {
+  try {
+    let csrf = csrfToken();
+    if (!csrf) {
+      const bootstrap = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include" });
+      if (!bootstrap.ok) return { ok: false, transient: true };
+      const csrfBody = await bootstrap.json();
+      csrf = typeof csrfBody.csrf_token === "string" ? csrfBody.csrf_token : null;
+      setCsrfToken(csrf);
+    }
+    if (!csrf) return { ok: false, transient: true };
+    const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "content-type": "application/json",
+        "X-CSRF-Token": csrf,
+      },
+    });
+    if (resp.status === 401) {
+      // The session itself is gone — but a second tab may have rotated the
+      // shared cookie microseconds ago, so retrying once is always worth it.
+      return { ok: false, retryable: true, authFailed: true };
+    }
+    if (!resp.ok) {
+      // 403 here is usually a stale CSRF mirror, 429/5xx a throttled or
+      // restarting backend. None of those mean "signed out".
+      return { ok: false, retryable: true, transient: true };
+    }
+    const body = await resp.json();
+    setAccessToken(body.access_token);
+    if (typeof body.csrf_token === "string") setCsrfToken(body.csrf_token);
+    return { ok: true, user: body.user, expiresIn: body.expires_in };
+  } catch {
+    return { ok: false, transient: true };
+  }
+}
+
+/**
+ * Single-flight refresh: concurrent callers share one network attempt.
+ *
+ * "Stay signed in" needs one guarantee from this function: only a real 401
+ * (after one retry, which absorbs a rotation made by another tab) may clear
+ * the session. A network blip, a 5xx, or a stale CSRF mirror is reported as
+ * `transient` and leaves the stored session untouched, so the UI keeps the
+ * device signed in instead of bouncing the user to the lock screen.
+ */
 export function tryRefresh(): Promise<RefreshResult> {
   if (!API_BASE_CONFIGURED) return Promise.resolve({ ok: false });
   refreshFlight ??= (async () => {
     try {
-      let csrf = csrfToken();
-      if (!csrf) {
-        const bootstrap = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include" });
-        if (!bootstrap.ok) return { ok: false };
-        const csrfBody = await bootstrap.json();
-        csrf = typeof csrfBody.csrf_token === "string" ? csrfBody.csrf_token : null;
-        setCsrfToken(csrf);
+      let result = await performRefresh();
+      if (!result.ok && result.retryable) {
+        // Give the cookie jar a beat: another tab's rotation may be landing.
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        result = await performRefresh();
       }
-      if (!csrf) return { ok: false };
-      const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
-        method: "POST",
-        credentials: "include",
-        headers: {
-          "content-type": "application/json",
-          "X-CSRF-Token": csrf,
-        },
-      });
-      if (!resp.ok) {
+      if (!result.ok && result.authFailed) {
         setAccessToken(null);
         setCsrfToken(null);
         return { ok: false };
       }
-      const body = await resp.json();
-      setAccessToken(body.access_token);
-      if (typeof body.csrf_token === "string") setCsrfToken(body.csrf_token);
-      return { ok: true, user: body.user, expiresIn: body.expires_in };
-    } catch {
-      return { ok: false };
+      if (!result.ok) return { ok: false, transient: true };
+      return result;
     } finally {
       setTimeout(() => {
         refreshFlight = null;
