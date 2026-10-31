@@ -8,6 +8,10 @@ already leaked. These tests pin down the three guards:
     leaves them unverified (the live probe is still the gate);
   * ``scripts/scan_secrets.py`` fails when a credential-shaped string is added
     to a tracked file, while letting deliberate fixtures through.
+
+secret-scan: allow-file — every key-shaped literal below is a synthetic fixture
+that this module feeds to the placeholder detector on purpose. Nothing here was
+ever issued by a provider; the CI scan skips this file by explicit directive.
 """
 
 from __future__ import annotations

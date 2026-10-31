@@ -10,7 +10,9 @@ Exit codes: 0 = clean, 1 = suspected credential found.
 
 Only *candidates* are reported, masked, and limited to patterns that providers
 actually issue. Deliberate fakes in fixtures are allowed when they announce
-themselves with mock/test/fake/example/placeholder/dummy in the value.
+themselves with mock/test/fake/example/placeholder/dummy in the value, or when a
+file states `secret-scan: allow-file` near the top of the file (used only by the
+unit test that exercises placeholder detection itself).
 """
 
 from __future__ import annotations
@@ -82,6 +84,13 @@ def scan_text(text: str) -> list[tuple[str, str]]:
     return findings
 
 
+ALLOW_FILE_DIRECTIVE = "secret-scan: allow-file"
+
+
+def _allows_file(text: str) -> bool:
+    return any(ALLOW_FILE_DIRECTIVE in line for line in text.splitlines()[:20])
+
+
 def scan(paths: list[Path]) -> list[str]:
     problems: list[str] = []
     for path in paths:
@@ -90,6 +99,8 @@ def scan(paths: list[Path]) -> list[str]:
         try:
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
+            continue
+        if _allows_file(text):
             continue
         for line_number, line in enumerate(text.splitlines(), start=1):
             for label, masked in scan_text(line):
