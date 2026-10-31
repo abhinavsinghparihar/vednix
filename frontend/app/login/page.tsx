@@ -187,7 +187,7 @@ function LoginInner() {
 
         <div className="flex items-center justify-between pt-0.5">
           <AuthCheck id="remember" checked={remember} onChange={setRemember}>
-            Keep me signed in for 30 days
+            Stay signed in on this device
           </AuthCheck>
           <button
             type="button"
@@ -197,6 +197,12 @@ function LoginInner() {
             Forgot password?
           </button>
         </div>
+
+        <p className="text-[11px] leading-relaxed text-faint">
+          {remember
+            ? "This device stays signed in until you sign out — even after months away. Your password is only asked for once."
+            : "Without this, the session ends when the browser closes (or after 12 hours)."}
+        </p>
 
         <AuthError message={error} />
         <AuthSubmit loading={loading}>{method === "otp" ? (otpSent ? "Verify code" : "Send email code") : "Sign in"}</AuthSubmit>

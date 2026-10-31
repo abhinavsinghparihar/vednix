@@ -9,7 +9,7 @@ from ai_engine.model_catalog import ModelInfo, ModelTask
 from ai_engine.provider_error import ProviderError
 from core.logging import get_logger
 from memory.models import ProviderKey
-from services.providers import REGISTRY, ProviderService
+from services.providers import FREE_PROVIDER_ID, REGISTRY, ProviderService
 
 logger = get_logger(__name__)
 
@@ -62,7 +62,7 @@ class ResilientLLM:
         row = await self._service._row(provider)
         if (
             row is None or not row.enabled or row.status != "connected"
-            or row.verified_at is None or not self._service._decrypt(row)
+            or row.verified_at is None or not self._service._has_credentials(row)
         ):
             await self._close_cached(provider)
             return None
@@ -99,9 +99,14 @@ class ResilientLLM:
         if provider:
             spec = REGISTRY[provider]
             row = await self._service._row(provider)
-            if row is None or not row.key_ciphertext:
+            if spec.keyless and (row is None or row.verified_at is None):
+                return (
+                    "Free use is not set up yet. Choose \"Free use\" next to the API key "
+                    "field in Settings → API Keys, or connect your own provider key."
+                )
+            if row is None or (not row.key_ciphertext and not spec.keyless):
                 return f"{spec.label} is not configured. Add its API key in Settings → AI Providers."
-            if not self._service._decrypt(row):
+            if not spec.keyless and not self._service._decrypt(row):
                 return f"The saved {spec.label} key could not be decrypted. Enter the key again in Settings."
             if row.status != "connected" or row.verified_at is None:
                 detail = self._service._safe_detail(row)
@@ -366,6 +371,20 @@ class ResilientLLM:
             "providers": provider_states,
         }
 
+    def _consume_free(self, provider: str, strict: bool) -> bool:
+        """Spend one free-tier request; an explicit free selection fails loudly."""
+        limit = int(getattr(self._settings, "free_use_requests_per_hour", 0) or 0)
+        if self._service.consume_free_request(limit):
+            return True
+        if strict:
+            raise ProviderError(
+                REGISTRY[provider].label,
+                "Hourly free-use limit reached. Add your own provider key in Settings → API Keys for unlimited use, then try again.",
+                category="rate_limit", retryable=True,
+            )
+        logger.info("Free-use hourly limit reached; skipping the shared tier")
+        return False
+
     async def _mark_error(self, provider: str, error: ProviderError, model: str, task: ModelTask) -> None:
         if error.authentication_error:
             await self._service.mark_failed(provider, error.message, disable=True)
@@ -392,6 +411,9 @@ class ResilientLLM:
         errors: list[str] = []
         for name, client in candidates:
             selected = model or client.model
+            if name == FREE_PROVIDER_ID and not self._consume_free(name, provider is not None):
+                errors.append(f"{REGISTRY[name].label}: hourly free-use limit reached.")
+                continue
             try:
                 selected = await self._choose_model(
                     name, client, model, task=required, strict=provider is not None,
@@ -434,6 +456,9 @@ class ResilientLLM:
         errors: list[str] = []
         for name, client in candidates:
             label = REGISTRY[name].label
+            if name == FREE_PROVIDER_ID and not self._consume_free(name, provider is not None):
+                errors.append(f"{label}: hourly free-use limit reached.")
+                continue
             try:
                 selected = await self._choose_model(
                     name, client, model, task=required, strict=provider is not None,

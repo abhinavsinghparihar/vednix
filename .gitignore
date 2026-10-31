@@ -18,6 +18,11 @@ chroma/
 # --- Secrets / env ---
 .env
 *.local
+# Local key-import files (feed them to backend/scripts/import_keys.py, then delete)
+*.keys.txt
+*keys*.txt
+vednix-keys*
+secrets/
 
 # --- Node / frontend ---
 node_modules/

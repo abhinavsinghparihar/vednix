@@ -518,12 +518,12 @@ function ModelsPanel() {
           <Button variant="subtle" size="sm" onClick={() => void loadModels(true)} disabled={loading}>
             <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} /> Refresh live list
           </Button>
-          <Button variant="primary" size="sm" onClick={() => void save()} disabled={!selected || saving || !row?.has_key}>
+          <Button variant="primary" size="sm" onClick={() => void save()} disabled={!selected || saving || !(row?.has_key || row?.keyless)}>
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : task === "text" ? "Use as chat default" : "Re-check task"}
           </Button>
         </div>
         <p className="mt-3 text-[11px] text-faint">
-          {row?.has_key ? `${row.label} · ${row.verified ? "provider verified" : "provider not verified"} · default: ${row.model_override ?? "not selected"}` : "Save and verify a provider key in API Keys before discovering models."}
+          {row?.has_key || row?.keyless ? `${row.label}${row.keyless ? " (free, no key)" : ""} · ${row.verified ? "provider verified" : "provider not verified"} · default: ${row.model_override ?? "not selected"}` : "Save and verify a provider key in API Keys before discovering models."}
         </p>
         {error && <p role="status" className="mt-2 text-[11px] text-[#f49a96]">{error}</p>}
         {note && <p role="status" className="mt-2 text-[11px] text-emerald-300">{note}</p>}
@@ -619,6 +619,31 @@ function ApiKeysPanel() {
 
   const labelFor = (id: string) => catalog.find((provider) => provider.id === id)?.label ?? id;
 
+  /* Free use is its own card: it is the one path that never involves a key,
+     so it must never look like "paste a secret here". */
+  const freeProvider = catalog.find((provider) => provider.free);
+  const paidCatalog = catalog.filter((provider) => !provider.free);
+  const freeRow = freeProvider ? rowFor(freeProvider.id) : undefined;
+  const freeOn = Boolean(freeRow?.verified && freeRow?.enabled);
+
+  const enableFree = async () => {
+    setBusy("free");
+    setNotice(null);
+    try {
+      const result = await providerApi.enableFree();
+      setNotice(
+        result.connected
+          ? "Free use is on — verified with a live reply. No API key was used or stored."
+          : `Free use is unavailable right now: ${result.detail}`,
+      );
+      await load();
+    } catch (err) {
+      setNotice(err instanceof ApiError ? err.message : "Could not reach the free tier. Try again or add your own key.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <Panel>
       <Card title="How keys live here" icon={ShieldCheck}>
@@ -626,6 +651,51 @@ function ApiKeysPanel() {
           Provider keys are encrypted on the backend with a server-side secret. They are never sent back to the browser, exposed in URLs, or stored in browser storage. The UI shows only a non-reversible key hint.
         </p>
       </Card>
+
+      {freeProvider && (
+        <Card title="Free use — no API key" icon={Sparkles}>
+          <p className="text-[12px] leading-relaxed text-muted">
+            Try Vednix without a provider account. Free use rides a shared, best-effort community tier:
+            replies can be slower, the hourly budget is finite, and your own key always takes priority
+            in routing. Nothing is stored, so there is no key here that can leak.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button
+              variant={freeOn ? "subtle" : "primary"}
+              size="sm"
+              onClick={() => void enableFree()}
+              disabled={busy === "free"}
+            >
+              {busy === "free" ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : freeOn ? (
+                <><CheckCircle2 className="h-3.5 w-3.5" /> {freeProvider.label} is on</>
+              ) : (
+                <><Sparkles className="h-3.5 w-3.5" /> Use free (no key)</>
+              )}
+            </Button>
+            {freeRow?.has_key === false && freeRow?.verified && (
+              <Button variant="subtle" size="sm" onClick={() => void toggle(freeProvider.id, !freeRow.enabled)}>
+                {freeRow.enabled ? "Disable" : "Enable"}
+              </Button>
+            )}
+            {freeRow?.has_key === false && (
+              <Button variant="danger" size="sm" onClick={() => void remove(freeProvider.id)} disabled={busy === freeProvider.id}>
+                <Trash2 className="h-3.5 w-3.5" /> Remove
+              </Button>
+            )}
+            <span className="ml-auto text-[11px] text-faint">0 keys stored · nothing to expose</span>
+          </div>
+          {freeRow?.status === "failed" && freeRow.status_detail && (
+            <p className="mt-2 text-[11px] leading-snug text-[#f49a96]">{freeRow.status_detail}</p>
+          )}
+          {freeRow?.model_override && freeOn && (
+            <p className="mt-2 text-[11px] text-faint">
+              Live-verified free model: <code className="font-mono text-muted">{freeRow.model_override}</code>
+            </p>
+          )}
+        </Card>
+      )}
 
       <Card title="Automatic failover priority" icon={Cloud}>
         <p className="mb-3 text-[11px] text-faint">
@@ -647,7 +717,7 @@ function ApiKeysPanel() {
       {notice && <p role="status" className="glass rounded-xl px-4 py-2.5 text-center text-[12px] text-gold-bright">{notice}</p>}
 
       <div className="space-y-3">
-        {catalog.map((provider, index) => {
+        {paidCatalog.map((provider, index) => {
           const row = rowFor(provider.id);
           const key = draft[provider.id] ?? "";
           const tone = !row ? "idle" : row.status === "connected" ? "ok" : row.status === "failed" ? "fail" : "warn";
@@ -669,6 +739,17 @@ function ApiKeysPanel() {
                     aria-label={`${provider.label} API key`} autoComplete="off" spellCheck={false}
                     className="glass h-10 min-w-0 flex-1 rounded-xl px-3 font-mono text-sm text-cream placeholder:text-faint focus:border-gold/40 focus:outline-none"
                   />
+                  {freeProvider && !row?.has_key && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void enableFree()}
+                      disabled={busy === "free" || busy === provider.id}
+                      title="Skip the key and use the shared free tier"
+                    >
+                      {busy === "free" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <><Sparkles className="h-3.5 w-3.5" /> Free use</>}
+                    </Button>
+                  )}
                 </div>
                 {row?.has_key && !key.trim() && (
                   <p className="text-[11px] text-emerald-300/90">

@@ -101,6 +101,8 @@ ProviderId = Literal[
     "sambanova",
     "nvidia",
     "perplexity",
+    # keyless shared tier: selectable exactly like a paid provider
+    "free",
 ]
 
 

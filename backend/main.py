@@ -10,6 +10,7 @@ controlled provider transport without real keys or external calls.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -138,7 +139,13 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             _data_dir(settings), session_factory, settings.secret_key,
         )
         app.state.secret = secret
-        app.state.users = UserService(session_factory, secret)
+        app.state.users = UserService(
+            session_factory, secret,
+            # "Stay signed in" is the default device experience: the refresh
+            # token rotates and slides, so an active device never signs out
+            # on its own. Only an explicit sign-out or a revoked session ends it.
+            remember_ttl=timedelta(days=settings.session_days),
+        )
         app.state.providers = ProviderService(session_factory, KeyVault(secret))
         app.state.onboarding = OnboardingService(session_factory)
 
@@ -161,8 +168,10 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
         )
         app.state.research = research
         logger.info(
-            "Vednix AI backend ready (providers=%d registered, fts5=%s, db=%s, uploads=%s)",
-            len(REGISTRY), fts_enabled, settings.database_url, settings.upload_dir,
+            "Vednix AI backend ready (providers=%d registered, free_use=%s, "
+            "session_days=%d, fts5=%s, db=%s, uploads=%s)",
+            len(REGISTRY), "on" if settings.free_use_enabled else "off",
+            settings.session_days, fts_enabled, settings.database_url, settings.upload_dir,
         )
         try:
             yield

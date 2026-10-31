@@ -225,7 +225,7 @@ function ProfileInner() {
                             {s.current && <span className="ml-2 rounded bg-emerald-400/15 px-1.5 py-0.5 text-[10px] text-emerald-300">this device</span>}
                           </p>
                           <p className="text-[11px] text-faint">
-                            signed in {new Date(s.created_at).toLocaleDateString()} · {s.remember ? "remembered" : "session only"}
+                            signed in {new Date(s.created_at).toLocaleDateString()} · {s.remember ? "stays signed in on this device" : "session only"}
                           </p>
                         </div>
                         {!s.current && (

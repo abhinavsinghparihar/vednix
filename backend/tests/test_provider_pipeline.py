@@ -35,6 +35,8 @@ EXPECTED_PROVIDERS = {
     "sambanova",
     "nvidia",
     "perplexity",
+    # keyless free tier: no account, no key, same live capability probe
+    "free",
 }
 _TEST_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -232,6 +234,10 @@ def test_catalog_has_only_supported_provider_setup_metadata(settings):
         assert "fireworks" not in provider_ids
         assert all("models" not in item for item in providers)
         assert all("models" not in item and "api_key" not in item for item in providers)
+        # The free tier is the only provider that never asks for a key.
+        by_id = {item["id"]: item for item in providers}
+        assert by_id["free"]["needs_key"] is False and by_id["free"]["free"] is True
+        assert all(item["needs_key"] is True for key, item in by_id.items() if key != "free")
 
 
 def test_openai_live_discovery_text_and_vision_filters(settings):

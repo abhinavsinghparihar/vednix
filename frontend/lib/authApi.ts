@@ -59,6 +59,8 @@ export interface ProviderCatalogItem {
   label: string;
   kind: string;
   needs_key: boolean;
+  /** Keyless shared tier (free use) — no account, no credential. */
+  free?: boolean;
   key_url: string;
   docs_url: string;
   capabilities: string[];
@@ -99,6 +101,8 @@ export interface ProviderConfig {
   enabled: boolean;
   configured?: boolean;
   has_key: boolean;
+  /** Server-side flag: this provider needs no stored credential. */
+  keyless?: boolean;
   key_hint: string | null;
   verified?: boolean;
   status: "unverified" | "connected" | "failed" | "unavailable";
@@ -113,6 +117,7 @@ export interface VerifyResult {
   connected: boolean;
   enabled?: boolean;
   verified?: boolean;
+  free?: boolean;
   verification_model?: string | null;
   model_available?: boolean;
   detail: string;
@@ -274,6 +279,8 @@ export const providerApi = {
       body: JSON.stringify(input),
     }),
   removeKey: (provider: string) => apiFetch<void>(`/api/providers/${provider}/key`, { method: "DELETE" }),
+  /** One click, no credential: verify the keyless free tier live and enable it. */
+  enableFree: () => apiFetch<VerifyResult>("/api/providers/free/enable", { method: "POST" }),
   verify: (provider: string) => apiFetch<VerifyResult>(`/api/providers/${provider}/verify`, { method: "POST" }),
   models: (provider: string, task = "text", force = false) =>
     apiFetch<{ provider: string; task: string; models: ProviderModelInfo[]; available: string[]; rejected: { id: string; reason: string }[]; default?: string; error?: string | null }>(

@@ -20,7 +20,9 @@ import {
 import { getAccessToken, tryRefresh } from "@/lib/tokenVault";
 
 type SessionState = "unknown" | "anon" | "authed" | "locked";
-//   unknown : not bootstrapped yet
+//   unknown : not bootstrapped yet (or the silent refresh hiccuped — the
+//             device stays signed in and the guard retries instead of
+//             treating a network blip as a sign-out)
 //   anon    : zero accounts on this machine & nobody signed in — treated
 //             like locked for protected routes (NO SIGNUP, NO ENTRY)
 //   authed  : signed in
@@ -59,6 +61,7 @@ export const useAuth = create<AuthState>((set, get) => ({
     let session: SessionState = "anon";
     let user: UserOut | null = null;
     if (status.auth_enabled) {
+      let transient = false;
       if (getAccessToken()) {
         try {
           user = await authApi.me();
@@ -68,9 +71,12 @@ export const useAuth = create<AuthState>((set, get) => ({
       }
       if (!user) {
         const r = await tryRefresh();
-        user = r.ok ? ((r.user as unknown as UserOut) ?? null) : null;
+        if (r.ok) user = (r.user as unknown as UserOut) ?? null;
+        else if (r.transient) transient = true;
       }
-      session = user ? "authed" : "locked";
+      // A transient failure is never a sign-out: stay "unknown" so the route
+      // guard retries while the device's long-lived session is still valid.
+      session = user ? "authed" : transient ? "unknown" : "locked";
     }
     set({ onboarding: status, session, user, checked: true });
     return status;

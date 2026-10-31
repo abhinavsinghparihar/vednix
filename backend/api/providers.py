@@ -18,9 +18,28 @@ def _provider_http_error(exc: ProviderError) -> HTTPException:
 
 
 @router.get("/catalog")
-async def catalog() -> dict:
+async def catalog(core=Depends(get_core)) -> dict:
     """Small product/provider metadata; models are never hardcoded here."""
-    return {"providers": provider_catalog()}
+    return {"providers": provider_catalog(core.settings)}
+
+
+@router.post("/free/enable")
+async def enable_free(
+    providers: ProviderService = Depends(get_providers),
+    core=Depends(get_core),
+) -> dict:
+    """Turn on the keyless free tier (one click, no credential anywhere).
+
+    The endpoint still performs the same live capability probe as a paid
+    provider, so "enabled" always means "it actually produced a streamed
+    token a moment ago" — never a configuration promise.
+    """
+    try:
+        return await providers.enable_free(settings=core.settings)
+    except ProviderError as exc:
+        raise _provider_http_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("")

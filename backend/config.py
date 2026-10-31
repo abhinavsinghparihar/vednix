@@ -42,6 +42,23 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     otp_ttl_seconds: int = 600
 
+    # Session lifetime for devices that chose "keep me signed in". The refresh
+    # token slides forward on every use, so an actively used device never has
+    # to sign in again; this value is only the ceiling for a device that stays
+    # unused (default: ten years).
+    session_days: int = 3650
+
+    # Free use: a keyless, shared-capacity inference path so the workspace can
+    # be tried without an API key. No credential is ever hardcoded — the
+    # endpoint, model candidates and optional operator token come from the
+    # environment. Every candidate still has to pass a live capability probe
+    # before it is exposed as usable, exactly like a paid provider.
+    free_use_enabled: bool = True
+    free_use_base_url: str = "https://text.pollinations.ai/openai"
+    free_use_models: str = "openai,mistral"
+    free_use_api_key: str = ""
+    free_use_requests_per_hour: int = 120
+
     # Server. Render supplies PORT; the application binds to all interfaces.
     host: str = "0.0.0.0"
     port: int = 8000
@@ -120,7 +137,37 @@ class Settings(BaseSettings):
             ):
                 raise ValueError("VEDNIX_CREATOR_LINKEDIN_URL must be a verified HTTPS linkedin.com profile URL.")
             self.creator_linkedin_url = linkedin.rstrip("/")
+
+        if not 1 <= self.session_days <= 36500:
+            raise ValueError("VEDNIX_SESSION_DAYS must be between 1 and 36500 (days).")
+        self.free_use_models = ", ".join(
+            model.strip() for model in self.free_use_models.replace(";", ",").split(",")
+            if model.strip() and len(model.strip()) <= 120
+        )
+        free_url = self.free_use_base_url.strip().rstrip("/")
+        if free_url:
+            parsed = urlsplit(free_url)
+            if (
+                parsed.scheme not in {"http", "https"} or not parsed.netloc
+                or parsed.query or parsed.fragment or parsed.username or parsed.password
+            ):
+                raise ValueError("VEDNIX_FREE_USE_BASE_URL must be a plain http(s) endpoint URL.")
+            if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+                raise ValueError("VEDNIX_FREE_USE_BASE_URL must use https outside localhost.")
+            self.free_use_base_url = free_url
+        if self.free_use_requests_per_hour < 1:
+            raise ValueError("VEDNIX_FREE_USE_REQUESTS_PER_HOUR must be at least 1.")
         return self
+
+    @property
+    def free_use_model_list(self) -> list[str]:
+        """Ordered, de-duplicated candidate models for the free-use path."""
+        seen: dict[str, None] = {}
+        for model in self.free_use_models.split(","):
+            clean = model.strip()
+            if clean:
+                seen.setdefault(clean, None)
+        return list(seen)
 
     @property
     def cors_origins_list(self) -> list[str]:

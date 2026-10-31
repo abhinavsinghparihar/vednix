@@ -49,9 +49,14 @@ class ProviderSpec:
     key_url: str
     docs_url: str
     blurb: str
+    # A keyless provider (free use) needs no stored credential. It is still
+    # required to pass the same live capability probe before it is usable.
+    needs_key: bool = True
+    keyless: bool = False
 
 
 ENGINE_LABEL = "Vednix AI"
+FREE_PROVIDER_ID = "free"
 REGISTRY: dict[str, ProviderSpec] = {
     "groq": ProviderSpec(
         id="groq",
@@ -152,25 +157,45 @@ REGISTRY: dict[str, ProviderSpec] = {
         docs_url="https://docs.perplexity.ai",
         blurb="Connect Perplexity Sonar models for search-grounded and general chat.",
     ),
+    # Free use: no account, no key. The endpoint is a shared, best-effort
+    # community tier, so it sits last in automatic routing and is rate limited
+    # per process. The URL and model candidates are environment-configurable
+    # (see Settings.free_use_*) — nothing is baked in as a credential.
+    FREE_PROVIDER_ID: ProviderSpec(
+        id=FREE_PROVIDER_ID,
+        label="Vednix Free",
+        kind="openai_compatible",
+        base_url="https://text.pollinations.ai/openai",
+        key_url="",
+        docs_url="",
+        blurb="Try Vednix with no API key through the shared free tier. Best-effort capacity, lower limits, and replies may be slower.",
+        needs_key=False,
+        keyless=True,
+    ),
 }
-DEFAULT_PRIORITY = list(REGISTRY.keys())
+# Own keys always win; the shared free tier is the last resort.
+DEFAULT_PRIORITY = [pid for pid in REGISTRY if pid != FREE_PROVIDER_ID] + [FREE_PROVIDER_ID]
 
 
 def provider_catalog(settings=None) -> list[dict[str, Any]]:
     """Provider setup metadata only; model data is fetched live per provider."""
-    return [
-        {
+    free_enabled = bool(getattr(settings, "free_use_enabled", True))
+    catalog: list[dict[str, Any]] = []
+    for spec in REGISTRY.values():
+        if spec.keyless and not free_enabled:
+            continue  # the operator switched the shared free tier off
+        catalog.append({
             "id": spec.id,
             "label": spec.label,
             "kind": spec.kind,
-            "needs_key": True,
+            "needs_key": spec.needs_key,
+            "free": spec.keyless,
             "key_url": spec.key_url,
             "docs_url": spec.docs_url,
             "blurb": spec.blurb,
-            "capabilities": ["text", "vision", "tools"],
-        }
-        for spec in REGISTRY.values()
-    ]
+            "capabilities": ["text"] if spec.keyless else ["text", "vision", "tools"],
+        })
+    return catalog
 
 
 class ProviderService:
@@ -184,6 +209,11 @@ class ProviderService:
         self._catalog_cache: dict[str, tuple[float, float, list[ModelInfo]]] = {}
         self._catalog_locks: dict[str, asyncio.Lock] = {}
         self._probe_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # Free-use bookkeeping: requests in the current rolling hour, and the
+        # optional operator token (env-only) that must be redacted from any
+        # human-readable detail string.
+        self._free_calls: list[float] = []
+        self._free_operator_key = ""
 
     async def _row(self, provider: str) -> ProviderKey | None:
         async with self._sessions() as db:
@@ -199,6 +229,16 @@ class ProviderService:
         except (ValueError, TypeError):
             return ""
 
+    @staticmethod
+    def _keyless(provider: str) -> bool:
+        spec = REGISTRY.get(provider)
+        return bool(spec and spec.keyless)
+
+    def _has_credentials(self, row: ProviderKey) -> bool:
+        """A keyless provider (free use) is credential-complete without a key;
+        everything else needs a decryptable stored key."""
+        return bool(self._decrypt(row)) or self._keyless(row.provider)
+
     async def _discover_models(
         self,
         provider: str,
@@ -206,6 +246,7 @@ class ProviderService:
         row: ProviderKey,
         *,
         force: bool = False,
+        settings=None,
     ) -> list[ModelInfo]:
         """Fetch official provider metadata once per short TTL/key revision."""
         version = row.updated_at.timestamp() if row.updated_at else 0.0
@@ -217,17 +258,70 @@ class ProviderService:
                 and time.monotonic() - cached[0] < _CATALOG_TTL_SECONDS
             ):
                 return list(cached[2])
-            models = await client.discover_models()
+            try:
+                models = await client.discover_models()
+            except ProviderError:
+                # A keyless community gateway may not publish /models at all.
+                # Anything else (including a paid provider's outage) still
+                # propagates exactly as before.
+                if not (self._keyless(provider) and settings is not None):
+                    raise
+                models = []
+            if not models and self._keyless(provider) and settings is not None:
+                # Keyless community gateways do not always publish a usable
+                # catalog. The operator's configured candidates are only
+                # *candidates*: each still has to pass a live completion and
+                # streaming probe before it can be selected.
+                models = self._configured_candidates(provider, settings)
             self._catalog_cache[provider] = (time.monotonic(), version, list(models))
             return models
+
+    @staticmethod
+    def _configured_candidates(provider: str, settings) -> list[ModelInfo]:
+        return [
+            ModelInfo(
+                id=model,
+                provider=provider,
+                displayName=model,
+                capabilities=ModelCapabilities(text=True),
+                contextWindow=None,
+                maxOutputTokens=None,
+                available=False,
+                reason="Awaiting a live chat and streaming capability check.",
+                checkedCapabilities=(),
+            )
+            for model in getattr(settings, "free_use_model_list", [])
+        ]
+
+    # --- free-use quota -------------------------------------------------------
+
+    def _prune_free_calls(self) -> None:
+        cutoff = time.monotonic() - 3600.0
+        self._free_calls = [stamp for stamp in self._free_calls if stamp > cutoff]
+
+    def free_quota_remaining(self, limit: int) -> int:
+        if limit <= 0:
+            return 0
+        self._prune_free_calls()
+        return max(0, limit - len(self._free_calls))
+
+    def consume_free_request(self, limit: int) -> bool:
+        """One free-tier request per call while the rolling-hour budget lasts."""
+        if limit <= 0:
+            return False
+        self._prune_free_calls()
+        if len(self._free_calls) >= limit:
+            return False
+        self._free_calls.append(time.monotonic())
+        return True
 
     def _safe_detail(self, row: ProviderKey) -> str | None:
         detail = " ".join(str(row.status_detail or "").split())
         if not detail:
             return None
-        key = self._decrypt(row)
-        if key:
-            detail = detail.replace(key, "[redacted]")
+        for secret in (self._decrypt(row), self._free_operator_key):
+            if secret:
+                detail = detail.replace(secret, "[redacted]")
         for pattern in _SECRET_PATTERNS:
             detail = pattern.sub("[redacted]", detail)
         return detail[:300] or None
@@ -240,6 +334,7 @@ class ProviderService:
             "enabled": bool(row.enabled),
             "configured": bool(row.key_ciphertext),
             "has_key": bool(row.key_ciphertext),
+            "keyless": bool(spec and spec.keyless),
             "key_hint": row.key_hint or None,
             "verified": row.status == "connected" and row.verified_at is not None,
             "status": row.status,
@@ -277,7 +372,7 @@ class ProviderService:
             row = (
                 await db.execute(select(ProviderKey).where(ProviderKey.provider == provider))
             ).scalar_one_or_none()
-            if row is None and not key:
+            if row is None and not key and REGISTRY[provider].needs_key:
                 raise ValueError(f"{REGISTRY[provider].label} requires an API key.")
             if row is None:
                 row = ProviderKey(provider=provider, key_ciphertext="", enabled=False)
@@ -287,7 +382,7 @@ class ProviderService:
             if key:
                 row.key_ciphertext = self._vault.encrypt(key)
                 row.key_hint = KeyVault.fingerprint(key)
-            elif not existing_key:
+            elif not existing_key and REGISTRY[provider].needs_key:
                 raise ValueError("No usable stored key exists. Enter the provider key again.")
             model_changed = selected_model is not None and selected_model != row.model_override
             if selected_model is not None:
@@ -317,6 +412,38 @@ class ProviderService:
             priority = await self.get_priority()
             return self._public(row, priority)
 
+    async def enable_free(self, *, settings) -> dict[str, Any]:
+        """Turn on the keyless free tier and prove it works with a live probe.
+
+        The row stores no credential; only after a real completion + streaming
+        check succeeds does it become ``connected`` and enabled — the same bar
+        every paid provider has to clear.
+        """
+        spec = REGISTRY.get(FREE_PROVIDER_ID)
+        if spec is None:
+            raise ValueError("Free use is not available in this build.")
+        if not getattr(settings, "free_use_enabled", False):
+            raise ValueError(
+                "Free use is turned off on this server. Set VEDNIX_FREE_USE_ENABLED=1 to allow it."
+            )
+        async with self._sessions() as db:
+            row = (
+                await db.execute(select(ProviderKey).where(ProviderKey.provider == FREE_PROVIDER_ID))
+            ).scalar_one_or_none()
+            if row is None:
+                row = ProviderKey(
+                    provider=FREE_PROVIDER_ID, key_ciphertext="", key_hint="",
+                    enabled=False, status="unverified", status_detail="",
+                )
+                db.add(row)
+            candidates = list(getattr(settings, "free_use_model_list", []))
+            if not row.model_override and candidates:
+                row.model_override = candidates[0]
+            await db.commit()
+        result = await self.verify(FREE_PROVIDER_ID, settings=settings)
+        result["free"] = True
+        return result
+
     async def remove_key(self, provider: str) -> bool:
         if provider not in REGISTRY:
             return False
@@ -336,7 +463,7 @@ class ProviderService:
                 return False
             if enabled and (row.status != "connected" or row.verified_at is None):
                 raise ValueError("Verify this provider and selected model successfully before enabling it.")
-            if enabled and not self._decrypt(row):
+            if enabled and not self._has_credentials(row):
                 raise ValueError("The stored API key could not be decrypted. Save the key and verify again.")
             row.enabled = enabled
             await db.commit()
@@ -383,12 +510,25 @@ class ProviderService:
         ):
             return None
         api_key = self._decrypt(row)
-        if not api_key:
+        if not api_key and not spec.keyless:
             return None
         model = row.model_override or ""
         kwargs = {"timeout": settings.llm_request_timeout}
         if provider == "groq":
             return GroqClient(api_key, model, **kwargs)
+        if spec.keyless:
+            # Endpoint and operator token are deployment configuration, never
+            # source. An empty token simply means the gateway is keyless.
+            base_url = (getattr(settings, "free_use_base_url", "") or spec.base_url).strip()
+            self._free_operator_key = str(getattr(settings, "free_use_api_key", "") or "").strip()
+            return OpenAICompatibleClient(
+                self._free_operator_key,
+                model,
+                provider=spec.id,
+                provider_name=spec.label,
+                base_url=base_url or spec.base_url,
+                **kwargs,
+            )
         return OpenAICompatibleClient(
             api_key,
             model,
@@ -654,13 +794,13 @@ class ProviderService:
         if task not in _SUPPORTED_TASKS:
             raise ValueError(f"Unknown model task '{task}'.")
         row = await self._row(provider)
-        if row is None or not self._decrypt(row):
+        if row is None or not self._has_credentials(row):
             raise ValueError(f"{REGISTRY[provider].label} is not configured with a usable API key.")
         client = self.build_client(provider, row, settings=settings, for_verification=True)
         if client is None:
             raise ValueError(f"{REGISTRY[provider].label} could not create a provider client.")
         try:
-            candidates = await self._discover_models(provider, client, row, force=force)
+            candidates = await self._discover_models(provider, client, row, force=force, settings=settings)
             returned: list[ModelInfo] = []
             rejected: list[dict[str, Any]] = []
             if task in {"text", "vision", "document_input", "tools"}:
@@ -715,13 +855,13 @@ class ProviderService:
             raise ValueError(f"Unknown model task '{task}'.")
         model_id = model_id.strip()
         row = await self._row(provider)
-        if row is None or not self._decrypt(row):
+        if row is None or not self._has_credentials(row):
             raise ValueError(f"{REGISTRY[provider].label} is not configured with a usable API key.")
         client = self.build_client(provider, row, settings=settings, for_verification=True)
         if client is None:
             raise ValueError(f"{REGISTRY[provider].label} could not create a provider client.")
         try:
-            candidates = await self._discover_models(provider, client, row, force=force)
+            candidates = await self._discover_models(provider, client, row, force=force, settings=settings)
             candidate = next((item for item in candidates if item.id == model_id), None)
             if candidate is None:
                 raise ProviderError(
@@ -745,11 +885,16 @@ class ProviderService:
             raise ValueError(f"Unknown provider '{provider}'.")
         row = await self._row(provider)
         spec = REGISTRY[provider]
-        if row is None or not self._decrypt(row):
+        if row is None or not self._has_credentials(row):
+            detail = (
+                f"{spec.label} is not set up yet. Choose \"Free use\" to turn it on."
+                if spec.keyless
+                else f"No usable {spec.label} API key is stored yet."
+            )
             return {
                 "provider": provider, "connected": False, "verified": False,
                 "enabled": False, "verification_model": None, "models": [],
-                "detail": f"No usable {spec.label} API key is stored yet.",
+                "detail": detail,
             }
         client = self.build_client(provider, row, settings=settings, for_verification=True)
         if client is None:
@@ -759,7 +904,7 @@ class ProviderService:
         detail = ""
         preserve_existing = False
         try:
-            candidates = await self._discover_models(provider, client, row, force=True)
+            candidates = await self._discover_models(provider, client, row, force=True, settings=settings)
             text_candidates = [candidate for candidate in candidates if candidate.capabilities.text]
             ordered_candidates: list[ModelInfo] = []
             if row.model_override:
@@ -903,11 +1048,11 @@ class ProviderService:
             "models": [model] if ok and model else [], "detail": "" if ok else clean,
         }
 
-    @staticmethod
-    def _redact_text(text: str, key: str = "") -> str:
+    def _redact_text(self, text: str, key: str = "") -> str:
         value = " ".join(str(text or "").split())
-        if key:
-            value = value.replace(key, "[redacted]")
+        for secret in (key, self._free_operator_key):
+            if secret:
+                value = value.replace(secret, "[redacted]")
         for pattern in _SECRET_PATTERNS:
             value = pattern.sub("[redacted]", value)
         return value[:300]

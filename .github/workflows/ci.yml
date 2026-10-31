@@ -15,6 +15,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      # A provider key in a tracked file is already leaked. Fail fast, before
+      # the key can be copied into an image or a release artifact.
+      - name: Scan tracked files for provider credentials
+        run: python scripts/scan_secrets.py
+
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
