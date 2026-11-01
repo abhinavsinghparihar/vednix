@@ -128,3 +128,23 @@ def core(settings):
     def core_for(llm, **kwargs) -> EngineCore:
         return EngineCore(settings=settings, llm=llm, plugins=PluginManager(build_plugins()), **kwargs)
     return core_for
+
+
+@pytest.fixture
+def promote_owner(settings):
+    """Provision admin via the same trusted-console path used in production."""
+    import anyio
+    from scripts.grant_admin import grant_owner
+
+    def promote(client, username, password):
+        async def assign():
+            engine, sessions = create_engine_and_session(settings.database_url)
+            try:
+                await grant_owner(sessions, username)
+            finally:
+                await engine.dispose()
+        anyio.run(assign)
+        response = client.post("/api/auth/login", json={"username": username, "password": password})
+        assert response.status_code == 200, response.text
+        return response.json()
+    return promote

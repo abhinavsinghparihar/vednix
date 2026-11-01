@@ -68,6 +68,8 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+      - name: Frontend auth regression tests
+        run: npm test
       - name: Typecheck
         run: npm run typecheck
       - name: Audit npm dependencies

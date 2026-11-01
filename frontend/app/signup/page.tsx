@@ -103,7 +103,7 @@ export default function SignupPage() {
   return (
     <AuthShell
       title="Create your account"
-      subtitle="The first account administers this workspace — it can manage users, sessions, and connected AI providers."
+      subtitle="Create your personal sign-in. Administrator access is assigned privately by the server operator."
     >
       <form onSubmit={submit} className="space-y-4" noValidate>
         <AuthField
@@ -112,7 +112,7 @@ export default function SignupPage() {
           autoFocus
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Abhinav Singh"
+          placeholder="Your full name"
           invalid={!!error && !name.trim()}
           disabled={loading}
         />
@@ -124,7 +124,7 @@ export default function SignupPage() {
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="abhinav@vednix.ai"
+            placeholder="you@example.com"
             invalid={!!email && !emailOk}
             disabled={loading}
             trailing={email ? (emailOk

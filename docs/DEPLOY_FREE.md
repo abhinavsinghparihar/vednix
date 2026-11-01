@@ -46,3 +46,64 @@ Optional backend settings include `VEDNIX_REDIS_URL` for shared rate limiting, `
 5. Test a text reply, then image routing only with a validated vision-capable model.
 
 No live provider verification can be claimed until a real user key passes the provider's check.
+
+## Fast entry and sessions that survive closing the browser
+
+`/chat` checks the refresh cookie before loading the workspace, models or
+WebSocket. A new visitor is sent to login without onboarding/provider requests.
+A returning device restores its in-memory access token from the **httpOnly**
+refresh cookie; credentials are not put in localStorage. A temporary network
+failure leaves entry pending and retries, rather than signing the device out.
+The cinematic boot overlay only plays on the landing page, not login/workspace.
+
+For production persistence, use **one** of these setups:
+
+- **SQLite + persistent disk:** mount a durable disk (for example `/var/data`),
+  set `VEDNIX_DATA_DIR=/var/data`, and leave the default database URL so the
+  settings resolver places SQLite inside that directory. Keep uploads and
+  `secret.key` on that disk too. Do not share SQLite across multiple replicas.
+- **Managed PostgreSQL:** install `asyncpg` alongside `requirements.txt` and set
+  `VEDNIX_DATABASE_URL` to the database connection URL in the hosting dashboard
+  (not in source control). Set a strong, stable `VEDNIX_SECRET_KEY` on every
+  replica. Upload files still need their own persistent storage.
+
+No additional database is needed for local use: SQLite is already configured.
+However, cookies alone cannot restore a session whose server-side database was
+lost on an ephemeral filesystem. A fixed secret alone cannot recover lost rows.
+Keep the same signing/encryption secret across deployments; changing it also
+invalidates access tokens and prevents decrypting existing provider keys.
+
+Keep browser HTTP requests same-origin through the Next.js `/api` proxy
+(`NEXT_PUBLIC_DIRECT_API` unset/false). Third-party cookie blocking in direct
+cross-site mode can prevent session restoration. Do not clear site cookies on
+exit; private browsing only remembers a session while its private window lives.
+
+A sleeping/cold backend can still delay the first session check. If that remains
+slow after these changes, use an always-on backend rather than adding artificial
+frontend delays or periodic keep-alive traffic.
+
+After deploying both frontend and backend, sign in with **Stay signed in on
+this device** checked, close and reopen the browser, and test again after a
+backend restart. Explicit logout and revoked sessions must still require login.
+
+## Private administrator provisioning
+
+Public signup **always** creates a `member`, including the very first account.
+Existing owners remain owners; this update does not sign them out or change
+their identity. No public screen contains an admin username, default password,
+or an admin-account shortcut. Admin routes check the stored role on every
+request, and API responses are marked `Cache-Control: no-store`.
+
+To assign the intended administrator on a new database, first register that
+person's own account, then run this **only in the backend server's trusted shell**:
+
+```sh
+cd backend
+python scripts/grant_admin.py <your-username>
+```
+
+The command revokes that account's pre-promotion sessions, requiring a fresh
+sign-in once. Running it for an existing owner leaves sessions untouched. There
+is intentionally no browser/API endpoint for granting admin. Do not use a
+shared admin login on other people's browsers. A normal signup, forged `role`
+field, or copied admin URL cannot grant admin access.

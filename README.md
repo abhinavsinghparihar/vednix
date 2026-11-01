@@ -86,3 +86,18 @@ Set a persistent production database and upload volume as appropriate for the ch
 - [Project inventory](docs/PROJECT_INVENTORY.md)
 
 Made by Abhinav Singh.
+
+### Administrator access
+
+Public signup creates **members only**, never an automatic first-user admin.
+Existing administrators are preserved. For a new installation, register your
+own account, then assign it from the trusted backend server shell:
+
+```sh
+cd backend
+python scripts/grant_admin.py <your-username>
+```
+
+Sign in again after promotion. There is no default/shared admin password or
+public admin-provisioning endpoint. See [deployment/session persistence](docs/DEPLOY_FREE.md)
+for storage requirements that keep remembered devices signed in across restarts.

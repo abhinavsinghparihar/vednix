@@ -233,7 +233,7 @@ export const authApi = {
 // ---------------------------------------------------------------------------
 
 export const onboardingApi = {
-  status: () => apiFetch<OnboardingStatus>("/api/onboarding/status", {}, { retryOn401: false }),
+  status: () => apiFetch<OnboardingStatus>("/api/onboarding/status", { signal: AbortSignal.timeout(10000) }, { retryOn401: false }),
   chooseMode: (mode: "cloud" = "cloud") =>
     apiFetch<OnboardingStatus>("/api/onboarding/mode", { method: "POST", body: JSON.stringify({ mode }) }),
   wipeData: () =>

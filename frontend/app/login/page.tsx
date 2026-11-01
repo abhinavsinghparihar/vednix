@@ -15,7 +15,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { TerminalSquare, Copy, Check, ArrowLeft, Mail, ShieldCheck } from "lucide-react";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { AuthCheck, AuthError, AuthField, AuthSubmit, PasswordField } from "@/components/auth/fields";
-import { authApi, onboardingApi } from "@/lib/authApi";
+import { authApi } from "@/lib/authApi";
 import { ApiError } from "@/lib/tokenVault";
 import { useAuth } from "@/store/auth";
 
@@ -26,7 +26,6 @@ function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
   const setUser = useAuth((s) => s.setUser);
-  const refreshOnboarding = useAuth((s) => s.refreshOnboarding);
 
   const [view, setView] = useState<View>("login");
   const [method, setMethod] = useState<LoginMethod>("password");
@@ -46,15 +45,8 @@ function LoginInner() {
   }, []);
 
   const goAfterAuth = useCallback(async () => {
-    let status = null;
-    try {
-      status = await onboardingApi.status();
-    } catch {
-      /* offline → workspace shows its own offline UI */
-    }
     const next = params.get("next");
-    if (next && next.startsWith("/")) router.replace(next);
-    else if (status && !status.setup_complete) router.replace("/onboarding");
+    if (next && next.startsWith("/") && !next.startsWith("//")) router.replace(next);
     else router.replace("/chat");
   }, [params, router]);
 
@@ -85,7 +77,6 @@ function LoginInner() {
           ? await authApi.verifyEmailOtp(identifier.trim(), otp, remember)
           : await authApi.login({ username: identifier.trim(), password, remember });
         setUser(user);
-        await refreshOnboarding();
         await goAfterAuth();
       }
     } catch (err) {
@@ -161,7 +152,7 @@ function LoginInner() {
           autoFocus
           value={identifier}
           onChange={(e) => setIdentifier(e.target.value)}
-          placeholder="abhinav · abhinav@vednix.ai"
+          placeholder="Your username or email"
           invalid={!!error}
           disabled={loading}
         />
