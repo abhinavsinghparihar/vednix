@@ -17,7 +17,7 @@ import {
   type OnboardingStatus,
   type UserOut,
 } from "@/lib/authApi";
-import { getAccessToken, tryRefresh } from "@/lib/tokenVault";
+import { ApiError, getAccessToken, tryRefresh } from "@/lib/tokenVault";
 
 type SessionState = "unknown" | "anon" | "authed" | "locked";
 //   unknown : not bootstrapped yet (or the silent refresh hiccuped — the
@@ -39,47 +39,49 @@ interface AuthState {
   signOut: () => Promise<void>;
 }
 
+let bootstrapFlight: Promise<OnboardingStatus> | null = null;
+
 export const useAuth = create<AuthState>((set, get) => ({
   user: null,
   session: "unknown",
   onboarding: null,
   checked: false,
 
-  bootstrap: async () => {
-    let status: OnboardingStatus;
-    try {
-      status = await onboardingApi.status();
-    } catch {
-      // backend unreachable: stay "unknown", the workspace shows its own
-      // backend-offline UI — a wrong redirect would be worse
-      set({ checked: true });
-      return {
+  bootstrap: () => {
+    if (bootstrapFlight) return bootstrapFlight;
+    bootstrapFlight = (async () => {
+      const fallback: OnboardingStatus = get().onboarding ?? {
         setup_complete: true, mode: null,
-        auth_enabled: false, providers: [], active_provider: "unavailable", chat_available: false,
+        auth_enabled: true, providers: [], active_provider: "unavailable", chat_available: false,
       };
-    }
-    let session: SessionState = "anon";
-    let user: UserOut | null = null;
-    if (status.auth_enabled) {
+      let user = getAccessToken() ? get().user : null;
       let transient = false;
-      if (getAccessToken()) {
+      if (!user && getAccessToken()) {
         try {
           user = await authApi.me();
-        } catch {
-          user = null;
+        } catch (error) {
+          transient = !(error instanceof ApiError && error.status === 401);
         }
       }
-      if (!user) {
-        const r = await tryRefresh();
-        if (r.ok) user = (r.user as unknown as UserOut) ?? null;
-        else if (r.transient) transient = true;
+      if (!user && !transient) {
+        const result = await tryRefresh();
+        if (result.ok) user = (result.user as unknown as UserOut) ?? null;
+        else transient = Boolean(result.transient);
       }
-      // A transient failure is never a sign-out: stay "unknown" so the route
-      // guard retries while the device's long-lived session is still valid.
-      session = user ? "authed" : transient ? "unknown" : "locked";
-    }
-    set({ onboarding: status, session, user, checked: true });
-    return status;
+      // Resolve the session before onboarding/provider work. No session means
+      // the login screen can open without waiting for the workspace services.
+      set({ user, session: user ? "authed" : transient ? "unknown" : "locked", checked: true });
+      if (!user) return fallback;
+      try {
+        const status = await onboardingApi.status();
+        set({ onboarding: status });
+        return status;
+      } catch {
+        // A valid session survives an unavailable onboarding endpoint.
+        return fallback;
+      }
+    })().finally(() => { bootstrapFlight = null; });
+    return bootstrapFlight;
   },
 
   refreshOnboarding: async () => {

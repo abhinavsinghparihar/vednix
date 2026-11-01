@@ -129,7 +129,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(120), default="")
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)  # optional, local-first
     password_hash: Mapped[str] = mapped_column(String(255))
-    role: Mapped[str] = mapped_column(String(16), default="owner")  # owner|member — role-ready
+    role: Mapped[str] = mapped_column(String(16), default="member")  # owner only via trusted provisioning
     avatar_color: Mapped[str] = mapped_column(String(16), default="gold")  # monogram chip tint
     theme: Mapped[str] = mapped_column(String(16), default="system")  # system|dark|light
     language: Mapped[str] = mapped_column(String(16), default="auto")

@@ -151,7 +151,9 @@ class UserService:
             if exists:
                 self._record_failure(ip)
                 raise AuthError("That username is taken.")
-            role = "owner" if await self.user_count() == 0 else "member"
+            # Public signup must never grant administrative privileges, even
+            # on an empty/recreated database. Owners are provisioned locally.
+            role = "member"
             user = User(
                 username=username, display_name=display_name.strip() or username,
                 email=email, password_hash=hash_password(password), role=role,

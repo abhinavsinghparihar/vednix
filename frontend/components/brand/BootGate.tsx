@@ -8,6 +8,7 @@
 
 "use client";
 
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Orb } from "@/components/orb/Orb";
@@ -18,10 +19,12 @@ const BOOT_KEY = "vednix.booted";
 const HOLD_MS = 2100;
 
 export function BootGate() {
+  const pathname = usePathname();
   const [show, setShow] = useState(false);
 
   // decide once: play the intro only on the first mount of the tab session
   useEffect(() => {
+    if (pathname !== "/") { setShow(false); return; }
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     try {
       if (!reduced && sessionStorage.getItem(BOOT_KEY) !== "1") {
@@ -31,7 +34,7 @@ export function BootGate() {
     } catch {
       if (!reduced) setShow(true); // no storage → still honor the intro
     }
-  }, []);
+  }, [pathname]);
 
   // auto-dismiss — a separate effect keyed on `show` (a stale-closure read
   // of `show` in the mount effect would leave the curtain up forever)
@@ -43,7 +46,7 @@ export function BootGate() {
 
   return (
     <AnimatePresence>
-      {show && (
+      {show && pathname === "/" && (
         <motion.div
           key="boot"
           exit={{ y: "-100%" }}

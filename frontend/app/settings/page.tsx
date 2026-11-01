@@ -181,7 +181,7 @@ export default function SettingsPage() {
               {tab === "keys" && <ApiKeysPanel />}
               {tab === "memory" && <MemoryPanel sys={sys} />}
               {tab === "privacy" && <PrivacyPanel reload={load} />}
-              {tab === "admin" && <AdminPanel />}
+              {tab === "admin" && me?.role === "owner" && <AdminPanel />}
               {tab === "experimental" && <ExperimentalPanel />}
               {tab === "about" && <AboutPanel />}
             </div>

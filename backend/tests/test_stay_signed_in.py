@@ -129,3 +129,36 @@ async def test_session_only_fallback_stays_twelve_hours(db, settings):
         remaining = _aware(session.expires_at) - datetime.now(timezone.utc)
     assert remaining <= REFRESH_TTL
     assert users.remember_ttl > timedelta(days=365)
+
+
+def test_csrf_bootstrap_reports_cookie_presence_without_caching(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        guest = client.get("/api/auth/csrf")
+        assert guest.status_code == 200
+        assert guest.json()["has_session"] is False
+        assert guest.headers["cache-control"] == "no-store"
+        assert guest.json()["csrf_token"]
+        client.post("/api/auth/register", json={"username": "cookiecheck", "password": "password-123"})
+        assert client.get("/api/auth/csrf").json()["has_session"] is True
+
+
+def test_reopened_browser_and_restarted_backend_restore_remembered_session(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        registered = client.post(
+            "/api/auth/register", json={"username": "returning", "password": "password-123"},
+        )
+        assert registered.status_code == 201
+        # A fresh browser process loses the SPA's access token, but keeps
+        # persistent cookies. A server restart must keep the session too.
+        cookies = dict(client.cookies)
+
+    with TestClient(create_app(settings=settings)) as reopened:
+        reopened.cookies.update(cookies)
+        bootstrap = reopened.get("/api/auth/csrf").json()
+        assert bootstrap["has_session"] is True
+        refreshed = reopened.post(
+            "/api/auth/refresh", headers={"X-CSRF-Token": bootstrap["csrf_token"]},
+        )
+        assert refreshed.status_code == 200, refreshed.text
+        assert refreshed.json()["user"]["username"] == "returning"
+        assert reopened.get("/api/auth/me", headers=_bearer(refreshed.json())).status_code == 200

@@ -85,6 +85,11 @@ class SecurityHeadersMiddleware:
                 for name, value in _SECURITY_HEADERS:
                     if name.encode("latin-1") not in names:
                         headers.append((name.encode("latin-1"), value.encode("latin-1")))
+                # Session/account responses must not leak through a browser,
+                # CDN or reverse-proxy cache to a different visitor.
+                if scope.get("path", "").startswith("/api/"):
+                    headers = [(n, v) for n, v in headers if n.lower() != b"cache-control"]
+                    headers.append((b"cache-control", b"no-store"))
                 if b"content-security-policy" not in names:
                     headers.append((b"content-security-policy", _API_CSP.encode("latin-1")))
                 if secure and b"strict-transport-security" not in names:

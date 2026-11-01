@@ -104,7 +104,7 @@ def _register(client: TestClient, username="abhinav", password="vednix-pass-1") 
 def test_register_login_refresh_logout_and_csrf(settings):
     with TestClient(create_app(settings=settings)) as client:
         body = _register(client)
-        assert body["user"]["role"] == "owner"  # first account owns the machine
+        assert body["user"]["role"] == "member"  # public signup never grants admin
         assert client.cookies.get("vednix_rt"), "refresh cookie must be set"
         assert client.cookies.get("vednix_csrf"), "csrf cookie must be set"
         access = body["access_token"]
@@ -231,9 +231,10 @@ def test_logout_revokes_the_access_token_immediately(settings):
         ).status_code == 401
 
 
-def test_admin_revoke_sessions_ends_that_members_access(settings):
+def test_admin_revoke_sessions_ends_that_members_access(settings, promote_owner):
     with TestClient(create_app(settings=settings)) as client:
-        owner = _register(client, username="owner", password="vednix-pass-1")
+        _register(client, username="owner", password="vednix-pass-1")
+        owner = promote_owner(client, "owner", "vednix-pass-1")
         member = _register(client, username="member", password="vednix-pass-2")
         owner_auth = {"Authorization": f"Bearer {owner['access_token']}"}
         member_auth = {"Authorization": f"Bearer {member['access_token']}"}

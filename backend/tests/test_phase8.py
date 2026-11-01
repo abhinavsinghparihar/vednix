@@ -1,6 +1,6 @@
 """Phase 8 — the owner's admin console.
 
-The first account owns the machine; the admin API is the owner exercising
+An explicitly provisioned owner administers the machine; the admin API is the owner exercising
 that ownership: list every account (with live sessions), reset passwords,
 revoke sessions, remove members. Members get 403, anonymous gets 401, and
 the last owner is immortal — no-signup-no-entry means the door must never
@@ -37,11 +37,12 @@ def _refresh(client: TestClient):
     )
 
 
-def test_owner_console_full_lifecycle(settings):
+def test_owner_console_full_lifecycle(settings, promote_owner):
     with TestClient(create_app(settings=settings)) as client:
-        owner = _register(client, "abhinav", "owner-pass-1")
+        _register(client, "abhinav", "owner-pass-1")
+        owner = promote_owner(client, "abhinav", "owner-pass-1")
         member = _register(client, "ravi", "member-pass-1")  # jar ← ravi's session
-        assert member["user"]["role"] == "member"  # only the first owns the machine
+        assert member["user"]["role"] == "member"  # public signup never grants admin
         ravi_id = member["user"]["id"]
 
         # --- the console table -------------------------------------------------
@@ -84,13 +85,66 @@ def test_owner_console_full_lifecycle(settings):
                            json={"username": "ravi", "password": "fresh-pass-9"}).status_code == 401
 
 
-def test_admin_anonymous_and_last_owner_protection(settings):
+def test_admin_anonymous_and_last_owner_protection(settings, promote_owner):
     with TestClient(create_app(settings=settings)) as client:
         # anonymous: the session lock answers before the admin gate even runs
         assert client.get("/api/admin/users").status_code in (401, 403)
 
-        owner = _register(client, "solo", "solo-pass-1")
+        _register(client, "solo", "solo-pass-1")
+        owner = promote_owner(client, "solo", "solo-pass-1")
         # service-level last-owner immortality (the HTTP layer redirects to a
         # self-delete 400 first, so this reaches straight into the service)
         with pytest.raises(PermissionError):
             anyio.run(client.app.state.users.admin_delete_user, owner["user"]["id"])
+
+
+def test_first_public_signup_and_role_injection_never_grant_admin(settings):
+    with TestClient(create_app(settings=settings)) as client:
+        created = client.post("/api/auth/register", json={
+            "username": "firstvisitor", "password": "member-pass-1", "role": "owner",
+        })
+        assert created.status_code == 201
+        member = created.json()
+        assert member["user"]["role"] == "member"
+        headers = _auth(member)
+        user_id = member["user"]["id"]
+        assert client.get("/api/admin/users", headers=headers).status_code == 403
+        assert client.post(f"/api/admin/users/{user_id}/password", headers=headers,
+                           json={"password": "changed-pass-1"}).status_code == 403
+        assert client.post(f"/api/admin/users/{user_id}/revoke-sessions", headers=headers).status_code == 403
+        assert client.delete(f"/api/admin/users/{user_id}", headers=headers).status_code == 403
+
+
+def test_separate_browser_does_not_inherit_owner_session(settings, promote_owner):
+    app = create_app(settings=settings)
+    with TestClient(app) as owner_browser:
+        _register(owner_browser, "privateowner", "owner-pass-1")
+        owner = promote_owner(owner_browser, "privateowner", "owner-pass-1")
+        # Separate client with an empty cookie jar is another visitor.
+        with TestClient(app) as visitor:
+            assert visitor.get("/api/auth/csrf").json()["has_session"] is False
+            assert visitor.get("/api/admin/users").status_code == 401
+            member = _register(visitor, "regularvisitor", "member-pass-1")
+            assert member["user"]["role"] == "member"
+            assert visitor.get("/api/auth/me", headers=_auth(member)).json()["id"] != owner["user"]["id"]
+            assert visitor.get("/api/admin/users", headers=_auth(member)).status_code == 403
+
+
+def test_demoted_owner_token_cannot_use_admin_api(settings, promote_owner):
+    from sqlalchemy import update
+    from memory.db import create_engine_and_session
+    from memory.models import User
+
+    with TestClient(create_app(settings=settings)) as client:
+        _register(client, "demoted", "owner-pass-1")
+        owner = promote_owner(client, "demoted", "owner-pass-1")
+        async def demote():
+            engine, sessions = create_engine_and_session(settings.database_url)
+            try:
+                async with sessions() as db:
+                    await db.execute(update(User).where(User.id == owner["user"]["id"]).values(role="member"))
+                    await db.commit()
+            finally:
+                await engine.dispose()
+        anyio.run(demote)
+        assert client.get("/api/admin/users", headers=_auth(owner)).status_code == 403

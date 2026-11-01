@@ -69,18 +69,22 @@ type AttemptResult = RefreshResult & { retryable?: boolean; authFailed?: boolean
 
 async function performRefresh(): Promise<AttemptResult> {
   try {
-    let csrf = csrfToken();
-    if (!csrf) {
-      const bootstrap = await fetch(`${API_BASE}/api/auth/csrf`, { credentials: "include" });
-      if (!bootstrap.ok) return { ok: false, transient: true };
-      const csrfBody = await bootstrap.json();
-      csrf = typeof csrfBody.csrf_token === "string" ? csrfBody.csrf_token : null;
-      setCsrfToken(csrf);
-    }
+    // Re-read the shared cookie's nonce, not a stale module-memory copy
+    // from before another tab rotated it. Also avoid two failing refreshes
+    // (and the retry delay) for a genuinely new visitor.
+    const bootstrap = await fetch(`${API_BASE}/api/auth/csrf`, {
+      credentials: "include", cache: "no-store", signal: AbortSignal.timeout(10000),
+    });
+    if (!bootstrap.ok) return { ok: false, transient: true };
+    const csrfBody = await bootstrap.json();
+    if (csrfBody.has_session === false) return { ok: false, authFailed: true };
+    const csrf = typeof csrfBody.csrf_token === "string" ? csrfBody.csrf_token : null;
+    setCsrfToken(csrf);
     if (!csrf) return { ok: false, transient: true };
     const resp = await fetch(`${API_BASE}/api/auth/refresh`, {
       method: "POST",
       credentials: "include",
+      signal: AbortSignal.timeout(10000),
       headers: {
         "content-type": "application/json",
         "X-CSRF-Token": csrf,
@@ -116,7 +120,7 @@ async function performRefresh(): Promise<AttemptResult> {
  */
 export function tryRefresh(): Promise<RefreshResult> {
   if (!API_BASE_CONFIGURED) return Promise.resolve({ ok: false });
-  refreshFlight ??= (async () => {
+  const refresh = async (): Promise<RefreshResult> => {
     try {
       let result = await performRefresh();
       if (!result.ok && result.retryable) {
@@ -136,6 +140,14 @@ export function tryRefresh(): Promise<RefreshResult> {
         refreshFlight = null;
       }, 0);
     }
+  };
+  // The cookie jar is shared by tabs. Serialize rotations across tabs too,
+  // otherwise the slower response can overwrite a newer refresh credential.
+  refreshFlight ??= (async () => {
+    if (typeof navigator !== "undefined" && navigator.locks) {
+      return await navigator.locks.request("vednix.session-refresh", refresh);
+    }
+    return await refresh();
   })();
   return refreshFlight;
 }
@@ -181,6 +193,7 @@ export async function apiFetch<T>(
     fetch(`${API_BASE}${path}`, {
       credentials: "include",
       ...init,
+      cache: "no-store",
       headers: {
         "content-type": "application/json",
         ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),

@@ -45,6 +45,7 @@ async def csrf_bootstrap(request: Request, response: Response) -> dict:
     API host, so the SPA bootstraps this nonce via credentialed CORS and keeps
     it in memory. The refresh token itself remains httpOnly and is never read.
     """
+    response.headers["Cache-Control"] = "no-store"
     token = request.cookies.get(CSRF_COOKIE, "")
     if not token or len(token) > 128:
         token = new_csrf_token()
@@ -53,7 +54,7 @@ async def csrf_bootstrap(request: Request, response: Response) -> dict:
             CSRF_COOKIE, token, max_age=_session_max_age(request, True), httponly=False,
             secure=secure, samesite=same_site, path="/",
         )
-    return {"csrf_token": token}
+    return {"csrf_token": token, "has_session": bool(request.cookies.get(RT_COOKIE))}
 
 
 def _user_out(u) -> UserOut:

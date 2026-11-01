@@ -1,6 +1,5 @@
 """Admin console (Phase 8) — owner-only control over every account on this
-machine. The FIRST registered account is the owner; everyone else answers
-to them. A member gets 403, an anonymous request never makes it past the
+machine. Owners are explicitly provisioned through the server console. A member gets 403, an anonymous request never makes it past the
 session lock (401).
 """
 
@@ -15,9 +14,12 @@ from services.users import UserService
 router = APIRouter(tags=["admin"])
 
 
-def require_owner(claims: dict = Depends(current_user)) -> dict:
-    """One gate, every admin route: the JWT itself carries the role."""
-    if claims.get("role") != "owner":
+async def require_owner(
+    claims: dict = Depends(current_user), users: UserService = Depends(get_users),
+) -> dict:
+    """Re-check the stored role, so stale owner tokens cannot retain access."""
+    user = await users.get_user(claims["sub"])
+    if user is None or user.role != "owner":
         raise HTTPException(status_code=403, detail="Owner access required.")
     return claims
 

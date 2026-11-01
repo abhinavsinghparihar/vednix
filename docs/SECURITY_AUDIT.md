@@ -21,8 +21,8 @@ These controls were reviewed and confirmed working — they are listed so the au
 | Authentication | Refresh tokens: 48 random bytes, only a SHA-256 digest stored, rotated on every use, reuse ⇒ the whole session chain is treated as stolen | ✅ verified |
 | Authentication | CSRF: double-submit token on the two cookie-bearing endpoints; API writes are CSRF-immune by construction (header-only bearer tokens) | ✅ verified |
 | Authorization | `SessionMiddleware` (ASGI, so it also covers WebSocket scopes) locks every `/api/*` and `/ws/*` route once one account exists | ✅ verified live |
-| Authorization | Admin console (`/api/admin/*`) requires `role == "owner"` in the JWT — a member gets 403, an anonymous request 401 | ✅ verified live |
-| Authorization | First registered account becomes owner; a member can never reach admin routes | ✅ verified |
+| Authorization | Admin console (`/api/admin/*`) re-checks the current database role (`owner`) — a member gets 403, an anonymous request 401 | ✅ verified live |
+| Authorization | Public signup always creates members; owners are explicitly provisioned from the trusted server console | ✅ verified |
 | Brute force | Per-IP login lockout (5 failures ⇒ 5-minute lockout) plus a dedicated 10/min credential-endpoint bucket, separate from the 120/min global limiter | ✅ verified |
 | Input handling | Uploads validated by extension, declared-vs-detected MIME, size and content before touching disk; message length bounded; NUL bytes stripped | ✅ verified |
 | Input handling | Raw exception text is never echoed to clients (`safe_error_message`), and provider-key validation errors strip the echoed input | ✅ verified |
