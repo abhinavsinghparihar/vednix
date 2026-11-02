@@ -33,9 +33,9 @@ VEDNIX_CORS_ORIGINS=https://vednix.vercel.app,http://localhost:3000,http://127.0
 
 The application adds those local origins and the production Vercel origin to its validated allowlist. If the frontend domain changes, update the backend configuration and redeploy. WebSocket origins are checked against the same list.
 
-Use persistent storage for the database, upload directory, and server secret. The current backend dependencies include SQLite support by default; a Render-managed PostgreSQL database also requires installing the matching async SQLAlchemy driver before setting `VEDNIX_DATABASE_URL`. The default SQLite database and local upload directory are suitable for development or a persistent disk; ephemeral filesystem deployments can lose local files between restarts. Set `VEDNIX_UPLOAD_DIR` to a persistent mount when uploads must survive restarts.
+Use persistent storage for the database, upload directory, and server secret. The current backend dependencies include SQLite support by default; the included asyncpg driver supports PostgreSQL when `VEDNIX_DATABASE_URL` is configured. The default SQLite database and local upload directory are suitable for development or a persistent disk; ephemeral filesystem deployments can lose local files between restarts. Set `VEDNIX_UPLOAD_DIR` to a persistent mount when uploads must survive restarts.
 
-Optional backend settings include `VEDNIX_REDIS_URL` for shared rate limiting, `VEDNIX_AUTH_TOKEN` for an additional bearer-token gate, SearXNG settings for research, and SMTP settings for email login. "Stay signed in" device sessions use `VEDNIX_SESSION_DAYS` (default `3650`), and the keyless free tier is configured with `VEDNIX_FREE_USE_ENABLED`, `VEDNIX_FREE_USE_BASE_URL`, `VEDNIX_FREE_USE_MODELS`, `VEDNIX_FREE_USE_REQUESTS_PER_HOUR` and the optional `VEDNIX_FREE_USE_API_KEY`; set `VEDNIX_FREE_USE_ENABLED=false` to offer paid providers only. Use Render's secret environment variable facility for credentials. Provider keys are deliberately entered in the authenticated Vednix Settings UI and encrypted by the backend; do not add them to Vercel variables or commit them.
+Optional backend settings include `VEDNIX_REDIS_URL` for shared rate limiting, `VEDNIX_AUTH_TOKEN` for an additional bearer-token gate, SearXNG settings for research, and SMTP settings for email login. "Stay signed in" device sessions use `VEDNIX_SESSION_DAYS` (default `30`), and the keyless free tier is configured with `VEDNIX_FREE_USE_ENABLED`, `VEDNIX_FREE_USE_BASE_URL`, `VEDNIX_FREE_USE_MODELS`, `VEDNIX_FREE_USE_REQUESTS_PER_HOUR` and the optional `VEDNIX_FREE_USE_API_KEY`; set `VEDNIX_FREE_USE_ENABLED=false` to offer paid providers only. Use Render's secret environment variable facility for credentials. Provider keys are deliberately entered in the authenticated Vednix Settings UI and encrypted by the backend; do not add them to Vercel variables or commit them.
 
 ## Verify after deployment
 
@@ -62,7 +62,7 @@ For production persistence, use **one** of these setups:
   set `VEDNIX_DATA_DIR=/var/data`, and leave the default database URL so the
   settings resolver places SQLite inside that directory. Keep uploads and
   `secret.key` on that disk too. Do not share SQLite across multiple replicas.
-- **Managed PostgreSQL:** install `asyncpg` alongside `requirements.txt` and set
+- **Managed PostgreSQL:** set
   `VEDNIX_DATABASE_URL` to the database connection URL in the hosting dashboard
   (not in source control). Set a strong, stable `VEDNIX_SECRET_KEY` on every
   replica. Upload files still need their own persistent storage.

@@ -43,10 +43,15 @@ async def init_schema(engine: AsyncEngine) -> bool:
             cols = {row[1] for row in (await conn.execute(text("PRAGMA table_info(messages)"))).all()}
             if "attachments" not in cols:
                 await conn.execute(text("ALTER TABLE messages ADD COLUMN attachments TEXT"))
+        # FTS5 is SQLite-specific. Issuing this DDL on PostgreSQL aborts the
+        # entire transaction, including create_all, even if Python catches it.
+        if engine.url.get_backend_name() != "sqlite":
+            return False
         try:
-            await conn.execute(
-                text("CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(chunk_id UNINDEXED, content)")
-            )
+            async with conn.begin_nested():
+                await conn.execute(
+                    text("CREATE VIRTUAL TABLE IF NOT EXISTS kb_fts USING fts5(chunk_id UNINDEXED, content)")
+                )
             return True
         except Exception:
             return False

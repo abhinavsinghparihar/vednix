@@ -153,7 +153,8 @@ async def ws_chat(ws: WebSocket) -> None:
     if origin and settings and origin.rstrip("/") not in settings.cors_origins_list:
         await ws.close(code=1008, reason="Origin is not allowed.")
         return
-    await ws.accept()
+    protocols = ws.scope.get("subprotocols", [])
+    await ws.accept(subprotocol="vednix" if "vednix" in protocols else None)
     core: EngineCore = ws.app.state.core
     memory: MemoryService = ws.app.state.memory
 
@@ -186,6 +187,13 @@ async def ws_chat(ws: WebSocket) -> None:
                 continue
 
             if payload.type == "user_message":
+                # A socket can outlive logout or an administrator's revocation.
+                # Its short-lived access token was verified at upgrade; check
+                # the backing session again before processing every new turn.
+                claims = ws.scope.get("state_user")
+                if claims and not await ws.app.state.users.access_session_active(str(claims.get("sid", ""))):
+                    await ws.close(code=4401, reason="Session revoked or expired.")
+                    break
                 if stream_task and not stream_task.done():
                     await sender.send(
                         {"type": "error", "code": "busy", "message": "Still generating — wait, or send 'cancel'."}

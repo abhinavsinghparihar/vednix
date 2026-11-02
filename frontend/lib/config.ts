@@ -4,7 +4,7 @@
  * Browser HTTP requests default to same-origin `/api/*` (proxied by Next.js
  * rewrites) so session refresh cookies remain first-party and are not dropped
  * by third-party cookie restrictions. WebSockets connect to the configured
- * backend origin with an authenticated token query parameter.
+ * backend origin using an authenticated WebSocket subprotocol.
  */
 
 const host = typeof window !== "undefined" ? window.location.hostname : "";

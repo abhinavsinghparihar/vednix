@@ -123,3 +123,42 @@ test("backend restart/5xx does not clear the device session", async () => {
   assert.equal((await v.tryRefresh()).transient, true);
   assert.equal(v.getAccessToken(), "existing");
 });
+
+test("uploads refresh an expired access token and retry with the new token", async () => {
+  let token = "expired";
+  let attempts = 0;
+  const apiModule = load("lib/api.ts", {
+    "./config": { ...config, WS_URL: "wss://example.test/ws/chat" },
+    "./tokenVault": {
+      ApiError: class extends Error {}, apiFetch: async () => {},
+      getAccessToken: () => token,
+      tryRefresh: async () => { token = "fresh"; return { ok: true }; },
+    },
+  }, {
+    FormData,
+    fetch: async (_url, init) => {
+      attempts++;
+      assert.equal(init.headers.Authorization, `Bearer ${attempts === 1 ? "expired" : "fresh"}`);
+      return attempts === 1 ? response({}, 401) : response([{ id: "file" }]);
+    },
+  });
+  const result = await apiModule.api.uploadFiles([]);
+  assert.equal(result[0].id, "file");
+  assert.equal(attempts, 2);
+});
+
+test("websocket credentials are passed via subprotocol rather than URL", () => {
+  let created;
+  class Socket {
+    static OPEN = 1;
+    static CONNECTING = 0;
+    constructor(url, protocols) { this.url = url; this.protocols = protocols; this.readyState = 0; created = this; }
+  }
+  const { WSClient } = load("lib/ws.ts", { "./tokenVault": {
+    getAccessToken: () => "header.payload.signature", tryRefresh: async () => ({ ok: true }),
+  } }, { WebSocket: Socket });
+  new WSClient("wss://example.test/ws/chat", () => {}, () => {}).connect();
+  assert.equal(created.url, "wss://example.test/ws/chat");
+  assert.equal(created.protocols[0], "vednix");
+  assert.equal(created.protocols[1], "vednix-auth.header.payload.signature");
+});

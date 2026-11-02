@@ -3,6 +3,8 @@
  * Auto-reconnect with backoff; frames are strictly typed (mirrors api/schemas.py).
  */
 
+import { getAccessToken, tryRefresh } from "./tokenVault";
+
 export type CoreStateName =
   | "IDLE" | "LISTENING" | "THINKING" | "SPEAKING"
   | "EXECUTING" | "SEARCHING" | "LEARNING" | "UPDATING";
@@ -55,7 +57,8 @@ export class WSClient {
     this.closedByUser = false;
     this.onStatus("connecting");
     try {
-      this.ws = new WebSocket(this.url);
+      const token = getAccessToken();
+      this.ws = new WebSocket(this.url, token ? ["vednix", `vednix-auth.${token}`] : []);
     } catch {
       this.scheduleReconnect();
       return;
@@ -71,15 +74,10 @@ export class WSClient {
         // malformed frames are ignored — server never sends them
       }
     };
-    this.ws.onclose = (ev) => {
+    this.ws.onclose = () => {
       this.onStatus("closed");
-      // 4401/4403 = the session gate rejected us (locked API, no/expired
-      // session). Retrying forever would just spin — stop; the auth store
-      // reroutes the shell and a fresh WSClient is built after sign-in.
-      if (ev.code === 4401 || ev.code === 4403) {
-        this.closedByUser = true;
-        return;
-      }
+      // Browsers often report rejected upgrades as 1006 instead of 4401.
+      // Reconnect through a fresh access token rather than retrying a stale one.
       if (!this.closedByUser) this.scheduleReconnect();
     };
     this.ws.onerror = () => this.ws?.close();
@@ -88,8 +86,17 @@ export class WSClient {
   private scheduleReconnect(): void {
     if (this.closedByUser || this.retries >= 8 || this.reconnectTimer) return;
     const delay = Math.min(8000, 400 * 2 ** this.retries++);
-    this.reconnectTimer = setTimeout(() => {
+    this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
+      if (this.closedByUser) return;
+      if (getAccessToken()) {
+        const refreshed = await tryRefresh();
+        if (this.closedByUser) return;
+        if (!refreshed.ok) {
+          if (refreshed.transient) this.scheduleReconnect();
+          return;
+        }
+      }
       this.connect();
     }, delay);
   }

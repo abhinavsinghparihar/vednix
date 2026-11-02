@@ -10,7 +10,7 @@ Security contract:
     session it was minted from — see SessionMiddleware's revocation check).
   - Refresh token : 48 random bytes, NEVER signed. Only its SHA-256 digest is
     stored (auth_sessions table) — a db leak can't mint sessions. Rotation on
-    every use; a reused digest ⇒ theft ⇒ whole session chain is revoked.
+    every use rejects reuse of the previous digest.
 """
 
 from __future__ import annotations

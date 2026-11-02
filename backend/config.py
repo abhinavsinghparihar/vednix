@@ -42,11 +42,8 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     otp_ttl_seconds: int = 600
 
-    # Session lifetime for devices that chose "keep me signed in". The refresh
-    # token slides forward on every use, so an actively used device never has
-    # to sign in again; this value is only the ceiling for a device that stays
-    # unused (default: ten years).
-    session_days: int = 3650
+    # Sliding inactivity lifetime for remembered sessions.
+    session_days: int = 30
 
     # Free use: a keyless, shared-capacity inference path so the workspace can
     # be tried without an API key. No credential is ever hardcoded — the

@@ -65,7 +65,7 @@ class FileStore:
                 record.extracted_chars = len(text)
             except ExtractionError as exc:
                 # not fatal: file stored, chat gets a clear reason instead of content
-                logger.warning("extraction failed for %s: %s", filename, exc)
+                logger.warning("attachment extraction failed (file_id=%s)", record.id)
 
         async with self._sessions() as session:
             session.add(record)
