@@ -1,5 +1,5 @@
 """Accounts & sessions service — register, login (with brute-force damping),
-refresh rotation with reuse detection, device management, profile updates.
+atomic refresh rotation, device management, profile updates.
 
 Local-first honesty notes:
   - The app runs OPEN until the first account exists (single-user default,
@@ -46,9 +46,9 @@ ACCESS_TTL = 20 * 60                    # 20 minutes
 REFRESH_TTL = timedelta(hours=12)       # session ends when the OS day does…
 # …unless the device chose "stay signed in". The refresh token rotates and
 # slides on every use, so an actively used device never has to sign in again;
-# this ceiling only bounds a device that is abandoned for years. Operators can
+# this ceiling bounds an inactive device. Operators can
 # tune it with VEDNIX_SESSION_DAYS.
-REFRESH_TTL_REMEMBER = timedelta(days=3650)
+REFRESH_TTL_REMEMBER = timedelta(days=30)
 
 MAX_FAILED_ATTEMPTS = 5          # then a short lockout
 LOCKOUT = timedelta(minutes=5)
@@ -70,6 +70,8 @@ class IssuedTokens:
     refresh_token: str
     access_expires_in: int
     session_id: str
+    remember: bool
+    expires_at: datetime
 
 
 class UserService:
@@ -246,7 +248,7 @@ class UserService:
         db.add(session)
         await db.commit()
         access, ttl_access = self._sign_access(user, session.id)
-        return IssuedTokens(access, refresh, ttl_access, session.id)
+        return IssuedTokens(access, refresh, ttl_access, session.id, session.remember, session.expires_at)
 
     async def issue_session_for(
         self, user: User, *, remember: bool, device_label: str,
@@ -263,7 +265,7 @@ class UserService:
                 return None
             return (await db.execute(select(User).where(User.id == session.user_id))).scalar_one_or_none()
 
-    # --- refresh (rotating, reuse-detecting) -------------------------------------
+    # --- refresh (rotating, single-use) -------------------------------------
 
     async def refresh(self, *, refresh_token: str, device_label: str = "") -> IssuedTokens:
         digest = refresh_digest(refresh_token)
@@ -276,20 +278,32 @@ class UserService:
                 raise AuthError("Session not found — sign in again.")
             if session.revoked or _aware(session.expires_at) <= now:
                 raise AuthError("Session expired — sign in again.")
-            # rotate: this digest dies, a new one is born
+            # Compare-and-swap prevents concurrent refreshes from both
+            # accepting one credential and issuing mutually invalid cookies.
             new_refresh = new_refresh_token()
-            session.refresh_digest = refresh_digest(new_refresh)
-            session.last_seen_at = now
+            expires_at = now + self._remember_ttl if session.remember else _aware(session.expires_at)
+            values = {
+                "refresh_digest": refresh_digest(new_refresh),
+                "last_seen_at": now,
+                "expires_at": expires_at,
+            }
             if device_label:
-                session.device_label = device_label[:160]
-            # sliding renewal on remembered sessions only: an active device
-            # keeps pushing its own expiry out, so it never signs itself out
-            if session.remember:
-                session.expires_at = now + self._remember_ttl
+                values["device_label"] = device_label[:160]
+            result = await db.execute(
+                update(AuthSession).where(
+                    AuthSession.id == session.id,
+                    AuthSession.refresh_digest == digest,
+                    AuthSession.revoked.is_(False),
+                    AuthSession.expires_at > now,
+                ).values(**values).execution_options(synchronize_session=False)
+            )
+            if result.rowcount != 1:
+                await db.rollback()
+                raise AuthError("Session already refreshed or revoked.")
             user = (await db.execute(select(User).where(User.id == session.user_id))).scalar_one()
             await db.commit()
             access, ttl_access = self._sign_access(user, session.id)
-            return IssuedTokens(access, new_refresh, ttl_access, session.id)
+            return IssuedTokens(access, new_refresh, ttl_access, session.id, session.remember, expires_at)
 
     # --- access-token resolution (middleware seam) ---------------------------------
 

@@ -51,6 +51,14 @@ def _token_from(scope: Scope) -> str | None:
             text = value.decode("latin-1")
             if text.lower().startswith("bearer "):
                 return text[7:].strip()
+    if scope["type"] == "websocket":
+        for name, value in scope.get("headers", []):
+            if name == b"sec-websocket-protocol":
+                protocols = [part.strip() for part in value.decode("latin-1").split(",")]
+                for protocol in protocols:
+                    if protocol.startswith("vednix-auth."):
+                        return protocol[len("vednix-auth."):]
+    # Compatibility with older clients. New clients do not put credentials in URLs.
     query = scope.get("query_string", b"").decode("latin-1")
     for pair in query.split("&"):
         if pair.startswith("token="):

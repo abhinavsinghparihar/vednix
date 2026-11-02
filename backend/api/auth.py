@@ -13,6 +13,8 @@ both designed out, not patched over.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from api.deps import current_user, get_auth_limiter, get_users
@@ -98,14 +100,17 @@ def _session_max_age(request: Request, remember: bool) -> int:
     if not remember:
         return 12 * 3600
     settings = getattr(request.app.state, "settings", None)
-    days = int(getattr(settings, "session_days", 3650) or 3650)
+    days = int(getattr(settings, "session_days", 30) or 30)
     return max(3600, days * 24 * 3600)
 
 
 def _set_session_cookies(
     response: Response, tokens: IssuedTokens, *, remember: bool, request: Request,
 ) -> str:
-    max_age = _session_max_age(request, remember)
+    expiry = tokens.expires_at
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    max_age = max(0, int((expiry - datetime.now(timezone.utc)).total_seconds()))
     secure, same_site = _cookie_policy(request)
     csrf_token = new_csrf_token()
     response.set_cookie(
@@ -227,7 +232,7 @@ async def refresh(request: Request, response: Response,
     if user is None:
         _clear_session_cookies(response, request)
         raise HTTPException(status_code=401, detail="Account not found.")
-    csrf_token = _set_session_cookies(response, tokens, remember=True, request=request)  # sliding renewal
+    csrf_token = _set_session_cookies(response, tokens, remember=tokens.remember, request=request)
     return _token_payload(user, tokens, csrf_token)
 
 

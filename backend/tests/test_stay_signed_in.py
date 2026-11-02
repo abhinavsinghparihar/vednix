@@ -43,7 +43,7 @@ def _refresh_cookie_lifetime(client) -> timedelta:
     return _aware(datetime.fromtimestamp(rt.expires, timezone.utc)) - datetime.now(timezone.utc)
 
 
-def test_registering_a_device_keeps_it_signed_in_for_years(settings):
+def test_registering_a_device_keeps_it_signed_in_for_configured_period(settings):
     with TestClient(create_app(settings=settings)) as client:
         created = client.post(
             "/api/auth/register",
@@ -128,7 +128,7 @@ async def test_session_only_fallback_stays_twelve_hours(db, settings):
         session = await db_session.get(AuthSession, tokens.session_id)
         remaining = _aware(session.expires_at) - datetime.now(timezone.utc)
     assert remaining <= REFRESH_TTL
-    assert users.remember_ttl > timedelta(days=365)
+    assert users.remember_ttl == timedelta(days=30)
 
 
 def test_csrf_bootstrap_reports_cookie_presence_without_caching(settings):

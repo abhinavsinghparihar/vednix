@@ -118,6 +118,16 @@ interface ChatStore {
 
 let ws: WSClient | null = null;
 let wsToken: string | null = null;
+
+// A rotated access token for the same session does not invalidate an already
+// open socket. Decode only for client lifecycle decisions; the server verifies it.
+function tokenSession(token: string | null): string | null {
+  if (!token) return null;
+  try {
+    const payload = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    return JSON.parse(atob(payload)).sid || null;
+  } catch { return null; }
+}
 let streamingId: string | null = null;
 let ttsWired = false;
 let modelRequestSequence = 0;
@@ -236,11 +246,12 @@ export const useChat = create<ChatStore>((set, get) => {
       set({ wsStatus: "closed" });
       return null;
     }
-    // A WebSocket upgrade cannot carry an Authorization header. The session
-    // token is therefore part of the URL, and the socket must be rebuilt when
-    // login/refresh changes it. Never retain an anonymous socket after auth.
+    // Rebuild the socket when login/refresh changes the in-memory token.
+    // The WebSocket client sends it in a subprotocol, never in the URL.
     const token = getAccessToken();
-    if (ws && wsToken !== token) {
+    const sameSession = token && wsToken && tokenSession(token)
+      && tokenSession(token) === tokenSession(wsToken);
+    if (ws && wsToken !== token && !sameSession) {
       ws.close();
       ws = null;
       wsToken = null;
@@ -249,9 +260,8 @@ export const useChat = create<ChatStore>((set, get) => {
       if (!ws.isOpen) ws.connect(); // bounded reconnect; a user retry restarts the attempt
       return ws;
     }
-    const url = token ? `${WS_URL}?token=${encodeURIComponent(token)}` : WS_URL;
     wsToken = token;
-    ws = new WSClient(url, handleFrame, (status) => set({ wsStatus: status }));
+    ws = new WSClient(WS_URL, handleFrame, (status) => set({ wsStatus: status }));
     ws.connect();
     return ws;
   }

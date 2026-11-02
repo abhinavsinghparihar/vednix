@@ -5,7 +5,7 @@
 
 import type { Language } from "./ws";
 import { API_BASE, API_BASE_CONFIGURED, WS_URL } from "./config";
-import { ApiError, apiFetch, getAccessToken } from "./tokenVault";
+import { ApiError, apiFetch, getAccessToken, tryRefresh } from "./tokenVault";
 
 export { API_BASE, WS_URL };
 export { ApiError };
@@ -164,13 +164,17 @@ export const api = {
     }
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
-    const token = getAccessToken();
-    const resp = await fetch(`${API_BASE}/api/uploads`, {
-      method: "POST",
-      body: form,
-      credentials: "include",
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
+    const upload = () => {
+      const token = getAccessToken();
+      return fetch(`${API_BASE}/api/uploads`, {
+        method: "POST",
+        body: form,
+        credentials: "include",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      });
+    };
+    let resp = await upload();
+    if (resp.status === 401 && (await tryRefresh()).ok) resp = await upload();
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({}));
       throw new ApiError(resp.status, body.detail ?? "Upload failed");

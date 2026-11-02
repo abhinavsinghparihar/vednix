@@ -153,7 +153,7 @@ class EngineSession:
                 try:
                     parts.append(await plugin.execute(text, ctx))
                 except Exception:
-                    logger.exception("plugin %r failed on input %.80s", plugin.name, text)
+                    logger.exception("plugin %r failed", plugin.name)
                     parts.append(f"⚠️ The `{plugin.name}` plugin hit an error. Detail was logged.")
             result = "\n\n".join(part for part in parts if part).strip() or "…"
             await self.memory.add_message(
@@ -267,7 +267,7 @@ class EngineSession:
         except Exception:
             logger.exception("could not read chat attachments (conv=%s)", self.conversation_id)
             await self.state.set(CoreState.IDLE)
-            message = "Vednix could not read one of the attached files. Re-upload it and try again."
+            message = "Vednix could not read one of the attached files. Scanned PDFs need OCR, which is not available here; convert pages to images or upload a text-based PDF."
             self.last_error = {"code": "ATTACHMENT_READ_FAILED", "message": message}
             yield message
             return
@@ -376,7 +376,7 @@ class EngineSession:
                 image_ids.append(att.id)
                 continue
             content = await self.core.files.read_text(att.id)
-            if content:
+            if content and content.strip():
                 truncated = content[: settings.file_context_max_chars]
                 marker = (
                     f"\n…(truncated to {settings.file_context_max_chars:,} of {len(content):,} chars)"
@@ -384,7 +384,7 @@ class EngineSession:
                 )
                 blocks.append(f"### File: {att.name}\n{truncated}{marker}")
             else:
-                blocks.append(f"### File: {att.name}\n(no readable text could be extracted)")
+                raise ValueError("No readable text could be extracted from an attachment.")
 
         enriched = text
         if blocks:

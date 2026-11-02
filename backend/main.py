@@ -176,7 +176,7 @@ def create_app(settings: Settings | None = None, llm_client=None) -> FastAPI:
             "Vednix AI backend ready (providers=%d registered, free_use=%s, "
             "session_days=%d, fts5=%s, db=%s, uploads=%s)",
             len(REGISTRY), "on" if settings.free_use_enabled else "off",
-            settings.session_days, fts_enabled, settings.database_url, settings.upload_dir,
+            settings.session_days, fts_enabled, db_engine.url.get_backend_name(), settings.upload_dir,
         )
         try:
             yield
